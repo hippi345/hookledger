@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>hookledger events</title>
+    <style>
+        body { font-family: system-ui, sans-serif; margin: 2rem; }
+        table { border-collapse: collapse; width: 100%; max-width: 960px; }
+        th, td { border: 1px solid #ccc; padding: 0.5rem 0.75rem; text-align: left; }
+        th { background: #f4f4f4; }
+        h1 { font-size: 1.5rem; }
+        .meta { color: #555; margin-bottom: 1rem; }
+    </style>
+</head>
+<body>
+<h1>hookledger</h1>
+<p class="meta">Stored money events (newest first). JSON API: <code>/api/events</code></p>
+<table th:if="${!events.isEmpty()}">
+    <thead>
+    <tr>
+        <th>Event id</th>
+        <th>Type</th>
+        <th>Amount (minor)</th>
+        <th>Currency</th>
+        <th>Received</th>
+        <th>Replays</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr th:each="event : ${events}">
+        <td th:text="${event.eventId}"></td>
+        <td th:text="${event.type}"></td>
+        <td th:text="${event.amountMinor}"></td>
+        <td th:text="${event.currency}"></td>
+        <td th:text="${event.receivedAt}"></td>
+        <td th:text="${event.replayCount}"></td>
+    </tr>
+    </tbody>
+</table>
+<p th:if="${events.isEmpty()}">No events yet.</p>
+</body>
+</html>
