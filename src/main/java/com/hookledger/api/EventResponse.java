@@ -19,6 +19,8 @@ public record EventResponse(
         boolean signed,
         boolean replayed,
         boolean duplicate,
+        boolean reversed,
+        String reversesEventId,
         String refundChargeId,
         List<String> payoutChargeIds) {
 
@@ -37,6 +39,8 @@ public record EventResponse(
                 EventStateFlags.isSigned(flags),
                 EventStateFlags.isReplayed(flags),
                 EventStateFlags.isDuplicate(flags),
+                EventStateFlags.isReversed(flags),
+                event.getReversesEventId(),
                 event.getRefundChargeId(),
                 event.getPayoutChargeIds());
     }

@@ -1,6 +1,7 @@
 package com.hookledger.api;
 
 import com.hookledger.domain.LedgerEvent;
+import com.hookledger.domain.MoneyEventType;
 import com.hookledger.service.LedgerService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -8,6 +9,7 @@ import java.time.Instant;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -31,8 +33,11 @@ public class EventController {
     @GetMapping
     @Operation(summary = "List stored money events (newest first, paginated)")
     public EventPageResponse list(
-            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size) {
-        Page<LedgerEvent> events = ledgerService.listEventsPage(page, size);
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size,
+            @RequestParam(required = false) MoneyEventType type,
+            @RequestParam(required = false) String currency) {
+        Page<LedgerEvent> events = ledgerService.listEventsPage(page, size, type, currency);
         return new EventPageResponse(
                 events.getContent().stream().map(EventResponse::from).toList(),
                 events.getNumber(),
@@ -66,6 +71,15 @@ public class EventController {
         return ledgerService
                 .undoLastReplay()
                 .map(event -> ResponseEntity.ok(EventResponse.from(event)))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/{eventId}/reverse")
+    @Operation(summary = "Void a posted event with an opposite balanced entry (original row is kept)")
+    public ResponseEntity<EventResponse> reverse(@PathVariable String eventId) {
+        return ledgerService
+                .reverse(eventId)
+                .map(event -> ResponseEntity.status(HttpStatus.CREATED).body(EventResponse.from(event)))
                 .orElse(ResponseEntity.notFound().build());
     }
 

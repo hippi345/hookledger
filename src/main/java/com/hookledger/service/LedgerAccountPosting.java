@@ -26,6 +26,9 @@ public final class LedgerAccountPosting {
         long debitLeg = Math.abs(event.getDebitMinor());
         long creditLeg = Math.abs(event.getCreditMinor());
         AccountPair pair = accountsFor(event.getType());
+        if (event.isReversal()) {
+            pair = new AccountPair(pair.creditAccount(), pair.debitAccount());
+        }
         if (pair.debitAccount().equals(account)) {
             return new Posting(debitLeg, 0);
         }

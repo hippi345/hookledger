@@ -16,6 +16,13 @@ public interface LedgerEventRepository extends JpaRepository<LedgerEvent, String
 
     Page<LedgerEvent> findAllByOrderByReceivedAtDesc(Pageable pageable);
 
+    Page<LedgerEvent> findByTypeOrderByReceivedAtDesc(MoneyEventType type, Pageable pageable);
+
+    Page<LedgerEvent> findByCurrencyOrderByReceivedAtDesc(String currency, Pageable pageable);
+
+    Page<LedgerEvent> findByTypeAndCurrencyOrderByReceivedAtDesc(
+            MoneyEventType type, String currency, Pageable pageable);
+
     List<LedgerEvent> findAllByOrderByReceivedAtAsc();
 
     List<LedgerEvent> findByCurrencyAndReceivedAtLessThanOrderByReceivedAtAsc(String currency, Instant before);
@@ -36,10 +43,19 @@ public interface LedgerEventRepository extends JpaRepository<LedgerEvent, String
     @Query(
             """
             SELECT COALESCE(SUM(
-                CASE e.type
-                    WHEN com.hookledger.domain.MoneyEventType.charge THEN e.amountMinor
-                    WHEN com.hookledger.domain.MoneyEventType.refund THEN -e.amountMinor
-                    ELSE 0
+                CASE
+                    WHEN e.reversesEventId IS NOT NULL THEN
+                        CASE e.type
+                            WHEN com.hookledger.domain.MoneyEventType.charge THEN -e.amountMinor
+                            WHEN com.hookledger.domain.MoneyEventType.refund THEN e.amountMinor
+                            ELSE 0
+                        END
+                    ELSE
+                        CASE e.type
+                            WHEN com.hookledger.domain.MoneyEventType.charge THEN e.amountMinor
+                            WHEN com.hookledger.domain.MoneyEventType.refund THEN -e.amountMinor
+                            ELSE 0
+                        END
                 END
             ), 0)
             FROM LedgerEvent e

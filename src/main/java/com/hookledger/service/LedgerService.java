@@ -2,6 +2,7 @@ package com.hookledger.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hookledger.domain.EventStateFlags;
 import com.hookledger.domain.LedgerEvent;
 import com.hookledger.domain.MoneyEventType;
 import com.hookledger.domain.ReplayIdempotency;
@@ -15,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -31,17 +33,20 @@ public class LedgerService {
     private final ReplayIdempotencyRepository replayIdempotencyRepository;
     private final ObjectMapper objectMapper;
     private final SettlementGraphService settlementGraphService;
+    private final PeriodCloseService periodCloseService;
     private final Deque<String> replayUndoStack = new ArrayDeque<>();
 
     public LedgerService(
             LedgerEventRepository repository,
             ReplayIdempotencyRepository replayIdempotencyRepository,
             ObjectMapper objectMapper,
-            SettlementGraphService settlementGraphService) {
+            SettlementGraphService settlementGraphService,
+            PeriodCloseService periodCloseService) {
         this.repository = repository;
         this.replayIdempotencyRepository = replayIdempotencyRepository;
         this.objectMapper = objectMapper;
         this.settlementGraphService = settlementGraphService;
+        this.periodCloseService = periodCloseService;
     }
 
     @Transactional
@@ -63,6 +68,9 @@ public class LedgerService {
         settlementGraphService.validateReferencedCharges(payload.id(), payload.type(), settlementTargets);
         settlementGraphService.validateReferencesAcyclic(payload.id(), settlementTargets);
 
+        Instant receivedAt = payload.effectiveAt() != null ? payload.effectiveAt() : Instant.now();
+        periodCloseService.assertOpenFor(receivedAt);
+
         LedgerEvent event = new LedgerEvent(
                 payload.id(),
                 payload.type(),
@@ -71,7 +79,7 @@ public class LedgerService {
                 sides.creditMinor(),
                 payload.currency().toUpperCase(),
                 rawPayload,
-                Instant.now(),
+                receivedAt.truncatedTo(ChronoUnit.MICROS),
                 payload.type() == MoneyEventType.refund ? payload.chargeId() : null,
                 payload.type() == MoneyEventType.payout ? payload.chargeIds() : List.of());
 
@@ -96,7 +104,7 @@ public class LedgerService {
     }
 
     @Transactional(readOnly = true)
-    public Page<LedgerEvent> listEventsPage(int page, int size) {
+    public Page<LedgerEvent> listEventsPage(int page, int size, MoneyEventType type, String currency) {
         if (page < 0) {
             throw new InvalidMoneyEventException("Page must be non-negative");
         }
@@ -104,6 +112,22 @@ public class LedgerService {
             throw new InvalidMoneyEventException("Size must be between 1 and 200");
         }
         Pageable pageable = PageRequest.of(page, size);
+        String normalizedCurrency = null;
+        if (currency != null && !currency.isBlank()) {
+            if (!MoneyEventValidation.CURRENCY.matcher(currency).matches()) {
+                throw new InvalidMoneyEventException("Currency must be a 3-letter ISO code");
+            }
+            normalizedCurrency = currency.toUpperCase();
+        }
+        if (type != null && normalizedCurrency != null) {
+            return repository.findByTypeAndCurrencyOrderByReceivedAtDesc(type, normalizedCurrency, pageable);
+        }
+        if (type != null) {
+            return repository.findByTypeOrderByReceivedAtDesc(type, pageable);
+        }
+        if (normalizedCurrency != null) {
+            return repository.findByCurrencyOrderByReceivedAtDesc(normalizedCurrency, pageable);
+        }
         return repository.findAllByOrderByReceivedAtDesc(pageable);
     }
 
@@ -204,6 +228,71 @@ public class LedgerService {
             event.undoLastReplay();
             return repository.save(event);
         });
+    }
+
+    @Transactional
+    public Optional<LedgerEvent> reverse(String eventId) {
+        return repository.findById(eventId).map(original -> {
+            if (EventStateFlags.isReversed(original.getStateFlags())) {
+                throw new InvalidMoneyEventException("Event is already reversed");
+            }
+            if (original.isReversal()) {
+                throw new InvalidMoneyEventException("Cannot reverse a reversal entry");
+            }
+            String reversalId = eventId + "_reversal";
+            if (reversalId.length() > 128 || !MoneyEventValidation.EVENT_ID.matcher(reversalId).matches()) {
+                throw new InvalidMoneyEventException("Unable to derive a reversal event id for " + eventId);
+            }
+            if (repository.existsById(reversalId)) {
+                throw new InvalidMoneyEventException("Reversal already exists for event " + eventId);
+            }
+
+            Instant reversalAt = periodCloseService.effectiveReversalTimestamp(
+                    original.getReceivedAt(), Instant.now());
+            periodCloseService.assertOpenFor(reversalAt);
+
+            long reversalDebit = -original.getDebitMinor();
+            long reversalCredit = -original.getCreditMinor();
+            DoubleEntryResolver.validateBalanced(new DoubleEntryResolver.DoubleEntrySides(reversalDebit, reversalCredit));
+
+            String rawPayload = buildReversalPayload(reversalId, original);
+            LedgerEvent reversal = new LedgerEvent(
+                    reversalId,
+                    original.getType(),
+                    original.getAmountMinor(),
+                    reversalDebit,
+                    reversalCredit,
+                    original.getCurrency(),
+                    rawPayload,
+                    reversalAt,
+                    original.getRefundChargeId(),
+                    original.getPayoutChargeIds(),
+                    eventId);
+
+            original.markReversed();
+            repository.save(original);
+            repository.saveAndFlush(reversal);
+            return reversal;
+        });
+    }
+
+    private String buildReversalPayload(String reversalId, LedgerEvent original) {
+        try {
+            return objectMapper.writeValueAsString(
+                    Map.of(
+                            "id",
+                            reversalId,
+                            "type",
+                            original.getType().name(),
+                            "amount",
+                            original.getAmountMinor(),
+                            "currency",
+                            original.getCurrency().toLowerCase(),
+                            "reversesEventId",
+                            original.getEventId()));
+        } catch (JsonProcessingException e) {
+            throw new InvalidMoneyEventException("Unable to serialize reversal payload", e);
+        }
     }
 
     private MoneyEventPayload parsePayload(String rawPayload) {
