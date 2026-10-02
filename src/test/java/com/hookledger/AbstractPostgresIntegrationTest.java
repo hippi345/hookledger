@@ -21,6 +21,11 @@ public abstract class AbstractPostgresIntegrationTest {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
-        registry.add("hookledger.webhook.secret", () -> "integration-test-secret");
+        registry.add(
+                "hookledger.webhook.secret",
+                () -> {
+                    String fromEnv = System.getenv("HOOKLEDGER_WEBHOOK_SECRET");
+                    return fromEnv != null && !fromEnv.isBlank() ? fromEnv : "integration-test-secret";
+                });
     }
 }

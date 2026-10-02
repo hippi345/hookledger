@@ -65,21 +65,26 @@ curl -sS -X POST http://localhost:8080/api/webhooks \
 | `GET` | `/api/payouts/{id}/charges` | Source charges for a payout (settlement graph walk) |
 | `POST` | `/api/events/{id}/replay` | Return event and increment replay count (404 if unknown) |
 | `POST` | `/api/events/replay/undo` | Undo the most recent replay (404 if stack empty) |
+| `GET` | `/api/trial-balance` | Per-account debits and credits in minor units (optional `currency` filter); response includes totals and whether the books still balance to zero |
 
 ### Balance
 
 Balance for a currency is **charges minus refunds** (amounts in minor units). **Payout events are recorded but do not change the balance** — only `charge` and `refund` affect the total.
 
-### Algorithms in the ledger
+### Trial balance
 
-| Idea | Where it is used |
-|------|------------------|
-| **Binary search** | `GET /api/events/by-timestamp` locates one row by exact `receivedAt` in the time-ordered event list. |
-| **Priority queue** | `GET /api/charges/top` returns the highest charge amounts up to your `limit`. |
-| **Regex** | Webhook ingest rejects event ids and currency codes that do not match the allowed patterns before save. |
-| **Stack** | `POST /api/events/replay/undo` pops the last replay and restores the prior replay count. |
-| **Bit flags** | Each stored event packs **signed**, **replayed**, and **duplicate** state; API responses expose `stateFlags` and booleans. |
-| **Settlement graph** | Refunds point at a charge; payouts list settled charges. Ingest rejects cycles (including a refund referencing itself). `GET /api/payouts/{id}/charges` walks from the payout to those charges. |
+`GET /api/trial-balance` rolls up stored events into ledger accounts (`cash`, `revenue`, `payout_clearing`) per currency, using each event’s `debitMinor` and `creditMinor` legs. The response lists every account with its debit and credit totals and reports whether **total debits minus total credits** is still zero.
+
+### Algorithms
+
+| Algorithm | Behavior |
+|-----------|----------|
+| **Binary search** | `GET /api/events/by-timestamp?at=` finds one event by exact `receivedAt` in the time-ordered list. |
+| **Priority queue** | `GET /api/charges/top?limit=` returns the largest charges up to `limit`. |
+| **Regex** | Webhook ingest rejects `id` and `currency` values that do not match the allowed patterns before save. |
+| **Stack** | `POST /api/events/replay/undo` pops the most recent replay and restores the prior replay count. |
+| **Bit flags** | Each stored event records **signed**, **replayed**, and **duplicate** in `stateFlags`; API responses also expose the booleans. |
+| **Graph walk** | `GET /api/payouts/{id}/charges` walks from a payout to its source charges; ingest rejects settlement cycles (including a refund that references itself). |
 
 ## Tests
 
