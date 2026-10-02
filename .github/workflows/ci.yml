@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      HOOKLEDGER_WEBHOOK_SECRET: integration-test-secret
     steps:
       - uses: actions/checkout@v4
 
