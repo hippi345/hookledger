@@ -78,7 +78,8 @@ class WebhookIntegrationTest extends AbstractPostgresIntegrationTest {
 
     @Test
     void replayIncrementsCounter() throws Exception {
-        byte[] body = "{\"id\":\"evt_replay\",\"type\":\"payout\",\"amount\":99,\"currency\":\"GBP\"}"
+        postSignedCharge("evt_replay_c", 50, "GBP");
+        byte[] body = ("{\"id\":\"evt_replay\",\"type\":\"payout\",\"amount\":99,\"currency\":\"GBP\",\"chargeIds\":[\"evt_replay_c\"]}")
                 .getBytes(StandardCharsets.UTF_8);
         String signature = verifier.computeHexHmacSha256(body);
 
@@ -90,7 +91,20 @@ class WebhookIntegrationTest extends AbstractPostgresIntegrationTest {
 
         mockMvc.perform(post("/api/events/evt_replay/replay"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.replayCount").value(1));
+                .andExpect(jsonPath("$.replayCount").value(1))
+                .andExpect(jsonPath("$.replayed").value(true));
+    }
+
+    private void postSignedCharge(String id, long amount, String currency) throws Exception {
+        String payload = String.format(
+                "{\"id\":\"%s\",\"type\":\"charge\",\"amount\":%d,\"currency\":\"%s\"}", id, amount, currency);
+        byte[] body = payload.getBytes(StandardCharsets.UTF_8);
+        String signature = verifier.computeHexHmacSha256(body);
+        mockMvc.perform(post("/api/webhooks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header(WebhookSignatureHeaders.SIGNATURE, signature)
+                        .content(payload))
+                .andExpect(status().isCreated());
     }
 
     @Test
