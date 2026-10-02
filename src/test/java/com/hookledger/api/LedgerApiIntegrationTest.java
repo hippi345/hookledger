@@ -10,7 +10,6 @@ import com.hookledger.AbstractPostgresIntegrationTest;
 import com.hookledger.repository.LedgerEventRepository;
 import com.hookledger.webhook.WebhookSignatureHeaders;
 import com.hookledger.webhook.WebhookSignatureVerifier;
-import com.jayway.jsonpath.JsonPath;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,7 +18,6 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MvcResult;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -113,13 +111,14 @@ class LedgerApiIntegrationTest extends AbstractPostgresIntegrationTest {
 
     @Test
     void findEventByTimestampUsesBinarySearch() throws Exception {
-        MvcResult created = postSignedWebhook(
+        postSignedWebhook(
                         "{\"id\":\"evt_ts\",\"type\":\"charge\",\"amount\":10,\"currency\":\"usd\"}")
-                .andExpect(status().isCreated())
-                .andReturn();
-        String receivedAt = JsonPath.read(created.getResponse().getContentAsString(), "$.receivedAt");
+                .andExpect(status().isCreated());
 
-        mockMvc.perform(get("/api/events/by-timestamp").param("at", receivedAt))
+        Instant receivedAt =
+                ledgerEventRepository.findById("evt_ts").orElseThrow().getReceivedAt();
+
+        mockMvc.perform(get("/api/events/by-timestamp").param("at", receivedAt.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value("evt_ts"));
     }

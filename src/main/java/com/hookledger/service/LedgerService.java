@@ -7,6 +7,7 @@ import com.hookledger.domain.MoneyEventType;
 import com.hookledger.repository.LedgerEventRepository;
 import com.hookledger.webhook.MoneyEventPayload;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -89,8 +90,9 @@ public class LedgerService {
 
     @Transactional(readOnly = true)
     public Optional<LedgerEvent> findEventByTimestamp(Instant receivedAt) {
+        Instant normalized = receivedAt.truncatedTo(ChronoUnit.MICROS);
         List<LedgerEvent> ordered = repository.findAllByOrderByReceivedAtAsc();
-        int index = binarySearchByTimestamp(ordered, receivedAt);
+        int index = binarySearchByTimestamp(ordered, normalized);
         if (index < 0) {
             return Optional.empty();
         }
@@ -214,7 +216,7 @@ public class LedgerService {
         int high = ordered.size() - 1;
         while (low <= high) {
             int mid = (low + high) >>> 1;
-            Instant midAt = ordered.get(mid).getReceivedAt();
+            Instant midAt = ordered.get(mid).getReceivedAt().truncatedTo(ChronoUnit.MICROS);
             int cmp = midAt.compareTo(target);
             if (cmp < 0) {
                 low = mid + 1;
