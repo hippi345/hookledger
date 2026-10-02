@@ -40,6 +40,8 @@ public class LedgerService {
     public IngestResult ingest(String rawPayload) {
         MoneyEventPayload payload = parsePayload(rawPayload);
         validatePayload(payload);
+        DoubleEntryResolver.DoubleEntrySides sides = DoubleEntryResolver.resolve(payload);
+        DoubleEntryResolver.validateBalanced(sides);
         List<String> settlementTargets = settlementTargets(payload);
 
         Optional<LedgerEvent> existing = repository.findById(payload.id());
@@ -57,6 +59,8 @@ public class LedgerService {
                 payload.id(),
                 payload.type(),
                 payload.amount(),
+                sides.debitMinor(),
+                sides.creditMinor(),
                 payload.currency().toUpperCase(),
                 rawPayload,
                 Instant.now(),

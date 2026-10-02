@@ -11,5 +11,7 @@ public record MoneyEventPayload(
         long amount,
         String currency,
         String chargeId,
-        List<String> chargeIds) {
+        List<String> chargeIds,
+        Long debitMinor,
+        Long creditMinor) {
 }
