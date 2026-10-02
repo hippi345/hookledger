@@ -1,0 +1,32 @@
+spring:
+  application:
+    name: hookledger
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/hookledger}
+    username: ${SPRING_DATASOURCE_USERNAME:hookledger}
+    password: ${SPRING_DATASOURCE_PASSWORD:hookledger}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  thymeleaf:
+    cache: true
+
+hookledger:
+  webhook:
+    secret: ${HOOKLEDGER_WEBHOOK_SECRET:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized
+
+springdoc:
+  api-docs:
+    path: /openapi/v3/api-docs
+  swagger-ui:
+    path: /openapi/swagger-ui.html
