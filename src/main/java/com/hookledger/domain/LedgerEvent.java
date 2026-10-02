@@ -29,6 +29,12 @@ public class LedgerEvent {
     @Column(nullable = false)
     private long amountMinor;
 
+    @Column(nullable = false)
+    private long debitMinor;
+
+    @Column(nullable = false)
+    private long creditMinor;
+
     @Column(nullable = false, length = 3)
     private String currency;
 
@@ -56,6 +62,8 @@ public class LedgerEvent {
             String eventId,
             MoneyEventType type,
             long amountMinor,
+            long debitMinor,
+            long creditMinor,
             String currency,
             String rawPayload,
             Instant receivedAt,
@@ -64,6 +72,8 @@ public class LedgerEvent {
         this.eventId = eventId;
         this.type = type;
         this.amountMinor = amountMinor;
+        this.debitMinor = debitMinor;
+        this.creditMinor = creditMinor;
         this.currency = currency;
         this.rawPayload = rawPayload;
         this.receivedAt = receivedAt;
@@ -83,6 +93,14 @@ public class LedgerEvent {
 
     public long getAmountMinor() {
         return amountMinor;
+    }
+
+    public long getDebitMinor() {
+        return debitMinor;
+    }
+
+    public long getCreditMinor() {
+        return creditMinor;
     }
 
     public String getCurrency() {

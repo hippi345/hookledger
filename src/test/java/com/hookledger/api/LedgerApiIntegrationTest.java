@@ -166,6 +166,27 @@ class LedgerApiIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
+    void rejectsUnbalancedDoubleEntrySides() throws Exception {
+        postSignedWebhook(
+                        "{\"id\":\"evt_unbal\",\"type\":\"charge\",\"amount\":100,\"currency\":\"usd\",\"debitMinor\":100,\"creditMinor\":-50}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Ledger sides must sum to zero in minor units"));
+
+        assertThat(ledgerEventRepository.count()).isZero();
+    }
+
+    @Test
+    void balancedChargeStoresDebitAndCreditSides() throws Exception {
+        postSignedWebhook("{\"id\":\"evt_bal\",\"type\":\"charge\",\"amount\":250,\"currency\":\"usd\"}")
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/api/events/evt_bal"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.debitMinor").value(250))
+                .andExpect(jsonPath("$.creditMinor").value(-250));
+    }
+
+    @Test
     void settlementGraphRejectsSelfReferencingRefund() throws Exception {
         postSignedWebhook(
                         "{\"id\":\"g_r1\",\"type\":\"refund\",\"amount\":10,\"currency\":\"usd\",\"chargeId\":\"g_r1\"}")
