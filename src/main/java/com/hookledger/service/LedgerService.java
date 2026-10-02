@@ -29,6 +29,11 @@ public class LedgerService {
         MoneyEventPayload payload = parsePayload(rawPayload);
         validatePayload(payload);
 
+        Optional<LedgerEvent> existing = repository.findById(payload.id());
+        if (existing.isPresent()) {
+            return new IngestResult(IngestStatus.ALREADY_EXISTS, existing.get());
+        }
+
         LedgerEvent event = new LedgerEvent(
                 payload.id(),
                 payload.type(),
@@ -41,8 +46,8 @@ public class LedgerService {
             repository.saveAndFlush(event);
             return new IngestResult(IngestStatus.CREATED, event);
         } catch (DataIntegrityViolationException ex) {
-            Optional<LedgerEvent> existing = repository.findById(payload.id());
-            return existing
+            return repository
+                    .findById(payload.id())
                     .map(e -> new IngestResult(IngestStatus.ALREADY_EXISTS, e))
                     .orElseThrow(() -> ex);
         }
