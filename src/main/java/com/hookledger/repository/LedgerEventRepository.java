@@ -2,7 +2,10 @@ package com.hookledger.repository;
 
 import com.hookledger.domain.LedgerEvent;
 import com.hookledger.domain.MoneyEventType;
+import java.time.Instant;
 import java.util.List;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -11,7 +14,14 @@ public interface LedgerEventRepository extends JpaRepository<LedgerEvent, String
 
     List<LedgerEvent> findAllByOrderByReceivedAtDesc();
 
+    Page<LedgerEvent> findAllByOrderByReceivedAtDesc(Pageable pageable);
+
     List<LedgerEvent> findAllByOrderByReceivedAtAsc();
+
+    List<LedgerEvent> findByCurrencyAndReceivedAtLessThanOrderByReceivedAtAsc(String currency, Instant before);
+
+    List<LedgerEvent> findByCurrencyAndReceivedAtBetweenOrderByReceivedAtAsc(
+            String currency, Instant fromInclusive, Instant toInclusive);
 
     List<LedgerEvent> findByTypeOrderByAmountMinorDesc(MoneyEventType type);
 

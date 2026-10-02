@@ -1,7 +1,6 @@
 package com.hookledger.service;
 
 import com.hookledger.domain.LedgerEvent;
-import com.hookledger.domain.MoneyEventType;
 import com.hookledger.repository.LedgerEventRepository;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -55,40 +54,28 @@ public class TrialBalanceService {
     }
 
     private static void applyEvent(Map<AccountKey, MutableLine> totals, LedgerEvent event) {
-        long debitLeg = Math.abs(event.getDebitMinor());
-        long creditLeg = Math.abs(event.getCreditMinor());
-        String currency = event.getCurrency();
-
-        AccountPair pair = accountsFor(event.getType());
-        addDebit(totals, currency, pair.debitAccount, debitLeg);
-        addCredit(totals, currency, pair.creditAccount, creditLeg);
+        LedgerAccountPosting.Posting cashSide = LedgerAccountPosting.postingForAccount(event, "cash");
+        LedgerAccountPosting.Posting revenueSide = LedgerAccountPosting.postingForAccount(event, "revenue");
+        LedgerAccountPosting.Posting clearingSide =
+                LedgerAccountPosting.postingForAccount(event, "payout_clearing");
+        addPosting(totals, event.getCurrency(), "cash", cashSide);
+        addPosting(totals, event.getCurrency(), "revenue", revenueSide);
+        addPosting(totals, event.getCurrency(), "payout_clearing", clearingSide);
     }
 
-    private static AccountPair accountsFor(MoneyEventType type) {
-        return switch (type) {
-            case charge -> new AccountPair("cash", "revenue");
-            case refund -> new AccountPair("revenue", "cash");
-            case payout -> new AccountPair("payout_clearing", "cash");
-        };
-    }
-
-    private static void addDebit(Map<AccountKey, MutableLine> totals, String currency, String account, long amount) {
-        if (amount == 0) {
-            return;
+    private static void addPosting(
+            Map<AccountKey, MutableLine> totals, String currency, String account, LedgerAccountPosting.Posting posting) {
+        if (posting.debitMinor() > 0) {
+            totals.computeIfAbsent(new AccountKey(currency, account), k -> new MutableLine()).debitMinor +=
+                    posting.debitMinor();
         }
-        totals.computeIfAbsent(new AccountKey(currency, account), k -> new MutableLine()).debitMinor += amount;
-    }
-
-    private static void addCredit(Map<AccountKey, MutableLine> totals, String currency, String account, long amount) {
-        if (amount == 0) {
-            return;
+        if (posting.creditMinor() > 0) {
+            totals.computeIfAbsent(new AccountKey(currency, account), k -> new MutableLine()).creditMinor +=
+                    posting.creditMinor();
         }
-        totals.computeIfAbsent(new AccountKey(currency, account), k -> new MutableLine()).creditMinor += amount;
     }
 
     private record AccountKey(String currency, String account) {}
-
-    private record AccountPair(String debitAccount, String creditAccount) {}
 
     private static final class MutableLine {
         long debitMinor;

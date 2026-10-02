@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.hookledger.AbstractPostgresIntegrationTest;
 import com.hookledger.repository.LedgerEventRepository;
+import com.hookledger.repository.ReplayIdempotencyRepository;
 import com.hookledger.webhook.WebhookSignatureHeaders;
 import com.hookledger.webhook.WebhookSignatureVerifier;
 import java.nio.charset.StandardCharsets;
@@ -30,8 +31,12 @@ class TrialBalanceHttpIntegrationTest extends AbstractPostgresIntegrationTest {
     @Autowired
     private LedgerEventRepository ledgerEventRepository;
 
+    @Autowired
+    private ReplayIdempotencyRepository replayIdempotencyRepository;
+
     @BeforeEach
     void cleanLedger() {
+        replayIdempotencyRepository.deleteAll();
         ledgerEventRepository.deleteAll();
     }
 
