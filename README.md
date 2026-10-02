@@ -57,13 +57,15 @@ curl -sS -X POST http://localhost:8080/api/webhooks \
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/webhooks` | Ingest signed webhook (201 created, 200 if id already exists) |
-| `GET` | `/api/events` | List events (JSON) |
+| `GET` | `/api/events` | List events (JSON, paginated: `page`, `size`) |
 | `GET` | `/api/events/{id}` | Get one stored event by id (404 if unknown) |
 | `GET` | `/api/events/by-timestamp?at=` | Get one event by exact `receivedAt` (ISO-8601) |
 | `GET` | `/api/balance/{currency}` | Balance in minor units for a 3-letter ISO currency |
 | `GET` | `/api/charges/top?limit=` | Largest charges by amount |
 | `GET` | `/api/payouts/{id}/charges` | Source charges for a payout (settlement graph walk) |
-| `POST` | `/api/events/{id}/replay` | Return event and increment replay count (404 if unknown) |
+| `POST` | `/api/events/{id}/replay` | Return event and increment replay count (404 if unknown); optional `Idempotency-Key` header replays at most once per key |
+| `GET` | `/api/accounts/{account}/statement` | Account statement for `currency` and `from` / `to` range (minor units, balances + lines) |
+| `GET` | `/api/accounts/{account}/statement.csv` | Same statement as CSV |
 | `POST` | `/api/events/replay/undo` | Undo the most recent replay (404 if stack empty) |
 | `GET` | `/api/trial-balance` | Per-account debits and credits in minor units (optional `currency` filter); response includes totals and whether the books still balance to zero |
 
@@ -74,6 +76,10 @@ Balance for a currency is **charges minus refunds** (amounts in minor units). **
 ### Trial balance
 
 `GET /api/trial-balance` rolls up stored events into ledger accounts (`cash`, `revenue`, `payout_clearing`) per currency, using each event’s `debitMinor` and `creditMinor` legs. The response lists every account with its debit and credit totals and reports whether **total debits minus total credits** is still zero.
+
+### Account statement
+
+`GET /api/accounts/{account}/statement?currency=&from=&to=` returns opening and closing balances for one ledger account and currency, plus debit/credit lines for events in the range. `GET .../statement.csv` exports the same data as CSV.
 
 ### Algorithms
 

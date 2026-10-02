@@ -4,7 +4,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hookledger.domain.LedgerEvent;
 import com.hookledger.domain.MoneyEventType;
+import com.hookledger.domain.ReplayIdempotency;
 import com.hookledger.repository.LedgerEventRepository;
+import com.hookledger.repository.ReplayIdempotencyRepository;
 import com.hookledger.webhook.MoneyEventPayload;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -16,6 +18,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,15 +28,18 @@ import org.springframework.transaction.annotation.Transactional;
 public class LedgerService {
 
     private final LedgerEventRepository repository;
+    private final ReplayIdempotencyRepository replayIdempotencyRepository;
     private final ObjectMapper objectMapper;
     private final SettlementGraphService settlementGraphService;
     private final Deque<String> replayUndoStack = new ArrayDeque<>();
 
     public LedgerService(
             LedgerEventRepository repository,
+            ReplayIdempotencyRepository replayIdempotencyRepository,
             ObjectMapper objectMapper,
             SettlementGraphService settlementGraphService) {
         this.repository = repository;
+        this.replayIdempotencyRepository = replayIdempotencyRepository;
         this.objectMapper = objectMapper;
         this.settlementGraphService = settlementGraphService;
     }
@@ -88,6 +96,18 @@ public class LedgerService {
     }
 
     @Transactional(readOnly = true)
+    public Page<LedgerEvent> listEventsPage(int page, int size) {
+        if (page < 0) {
+            throw new InvalidMoneyEventException("Page must be non-negative");
+        }
+        if (size <= 0 || size > 200) {
+            throw new InvalidMoneyEventException("Size must be between 1 and 200");
+        }
+        Pageable pageable = PageRequest.of(page, size);
+        return repository.findAllByOrderByReceivedAtDesc(pageable);
+    }
+
+    @Transactional(readOnly = true)
     public Optional<LedgerEvent> getEvent(String eventId) {
         return repository.findById(eventId);
     }
@@ -135,12 +155,43 @@ public class LedgerService {
     }
 
     @Transactional
-    public Optional<LedgerEvent> replay(String eventId) {
+    public Optional<LedgerEvent> replay(String eventId, Optional<String> idempotencyKey) {
+        if (idempotencyKey.isPresent()) {
+            String key = normalizeIdempotencyKey(idempotencyKey.get());
+            Optional<ReplayIdempotency> existing = replayIdempotencyRepository.findById(key);
+            if (existing.isPresent()) {
+                if (!existing.get().getEventId().equals(eventId)) {
+                    throw new IdempotencyConflictException(
+                            "Idempotency-Key was already used for a different event replay");
+                }
+                return repository.findById(eventId);
+            }
+            return applyReplay(eventId, key);
+        }
+        return applyReplay(eventId, null);
+    }
+
+    private Optional<LedgerEvent> applyReplay(String eventId, String idempotencyKey) {
         return repository.findById(eventId).map(event -> {
             event.recordReplay();
             replayUndoStack.push(eventId);
-            return repository.save(event);
+            LedgerEvent saved = repository.save(event);
+            if (idempotencyKey != null) {
+                replayIdempotencyRepository.save(
+                        new ReplayIdempotency(idempotencyKey, eventId, Instant.now()));
+            }
+            return saved;
         });
+    }
+
+    private static String normalizeIdempotencyKey(String key) {
+        if (key == null || key.isBlank()) {
+            throw new InvalidMoneyEventException("Idempotency-Key must not be blank");
+        }
+        if (key.length() > 256) {
+            throw new InvalidMoneyEventException("Idempotency-Key must be at most 256 characters");
+        }
+        return key.trim();
     }
 
     @Transactional

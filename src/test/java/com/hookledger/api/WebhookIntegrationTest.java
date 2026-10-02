@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.hookledger.AbstractPostgresIntegrationTest;
 import com.hookledger.repository.LedgerEventRepository;
+import com.hookledger.repository.ReplayIdempotencyRepository;
 import com.hookledger.webhook.WebhookSignatureHeaders;
 import com.hookledger.webhook.WebhookSignatureVerifier;
 import java.nio.charset.StandardCharsets;
@@ -32,11 +33,15 @@ class WebhookIntegrationTest extends AbstractPostgresIntegrationTest {
     @Autowired
     private LedgerEventRepository ledgerEventRepository;
 
+    @Autowired
+    private ReplayIdempotencyRepository replayIdempotencyRepository;
+
     private static final String PAYLOAD =
             "{\"id\":\"evt_integration_1\",\"type\":\"charge\",\"amount\":2500,\"currency\":\"EUR\"}";
 
     @BeforeEach
     void cleanLedger() {
+        replayIdempotencyRepository.deleteAll();
         ledgerEventRepository.deleteAll();
     }
 
@@ -72,8 +77,8 @@ class WebhookIntegrationTest extends AbstractPostgresIntegrationTest {
 
         mockMvc.perform(get("/api/events"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].id").value("evt_integration_1"));
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].id").value("evt_integration_1"));
     }
 
     @Test

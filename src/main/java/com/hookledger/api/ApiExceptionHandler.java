@@ -1,8 +1,8 @@
 package com.hookledger.api;
 
-import com.hookledger.service.LedgerService;
-import com.hookledger.service.SettlementGraphException;
+import com.hookledger.service.IdempotencyConflictException;
 import com.hookledger.service.InvalidMoneyEventException;
+import com.hookledger.service.SettlementGraphException;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -20,5 +20,10 @@ public class ApiExceptionHandler {
     @ExceptionHandler(SettlementGraphException.class)
     public ResponseEntity<Map<String, String>> handleSettlementGraph(SettlementGraphException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", ex.getMessage()));
+    }
+
+    @ExceptionHandler(IdempotencyConflictException.class)
+    public ResponseEntity<Map<String, String>> handleIdempotencyConflict(IdempotencyConflictException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", ex.getMessage()));
     }
 }

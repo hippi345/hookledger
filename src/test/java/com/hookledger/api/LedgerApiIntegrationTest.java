@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.hookledger.AbstractPostgresIntegrationTest;
 import com.hookledger.repository.LedgerEventRepository;
+import com.hookledger.repository.ReplayIdempotencyRepository;
 import com.hookledger.webhook.WebhookSignatureHeaders;
 import com.hookledger.webhook.WebhookSignatureVerifier;
 import java.nio.charset.StandardCharsets;
@@ -33,8 +34,12 @@ class LedgerApiIntegrationTest extends AbstractPostgresIntegrationTest {
     @Autowired
     private LedgerEventRepository ledgerEventRepository;
 
+    @Autowired
+    private ReplayIdempotencyRepository replayIdempotencyRepository;
+
     @BeforeEach
     void cleanLedger() {
+        replayIdempotencyRepository.deleteAll();
         ledgerEventRepository.deleteAll();
     }
 
@@ -151,6 +156,25 @@ class LedgerApiIntegrationTest extends AbstractPostgresIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.replayCount").value(0))
                 .andExpect(jsonPath("$.replayed").value(false));
+    }
+
+    @Test
+    void eventListSupportsPagination() throws Exception {
+        postSignedWebhook("{\"id\":\"page_a\",\"type\":\"charge\",\"amount\":1,\"currency\":\"usd\"}");
+        postSignedWebhook("{\"id\":\"page_b\",\"type\":\"charge\",\"amount\":2,\"currency\":\"usd\"}");
+        postSignedWebhook("{\"id\":\"page_c\",\"type\":\"charge\",\"amount\":3,\"currency\":\"usd\"}");
+
+        mockMvc.perform(get("/api/events").param("page", "0").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(2))
+                .andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.content.length()").value(2));
+
+        mockMvc.perform(get("/api/events").param("page", "1").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1));
     }
 
     @Test

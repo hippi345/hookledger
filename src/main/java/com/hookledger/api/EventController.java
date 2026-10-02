@@ -1,15 +1,18 @@
 package com.hookledger.api;
 
+import com.hookledger.domain.LedgerEvent;
 import com.hookledger.service.LedgerService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.time.Instant;
-import java.util.List;
+import java.util.Optional;
+import org.springframework.data.domain.Page;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -26,9 +29,16 @@ public class EventController {
     }
 
     @GetMapping
-    @Operation(summary = "List stored money events (newest first)")
-    public List<EventResponse> list() {
-        return ledgerService.listEvents().stream().map(EventResponse::from).toList();
+    @Operation(summary = "List stored money events (newest first, paginated)")
+    public EventPageResponse list(
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size) {
+        Page<LedgerEvent> events = ledgerService.listEventsPage(page, size);
+        return new EventPageResponse(
+                events.getContent().stream().map(EventResponse::from).toList(),
+                events.getNumber(),
+                events.getSize(),
+                events.getTotalElements(),
+                events.getTotalPages());
     }
 
     @GetMapping("/by-timestamp")
@@ -61,9 +71,11 @@ public class EventController {
 
     @PostMapping("/{eventId}/replay")
     @Operation(summary = "Replay a stored event by id (increments replay count)")
-    public ResponseEntity<EventResponse> replay(@PathVariable String eventId) {
+    public ResponseEntity<EventResponse> replay(
+            @PathVariable String eventId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         return ledgerService
-                .replay(eventId)
+                .replay(eventId, Optional.ofNullable(idempotencyKey))
                 .map(event -> ResponseEntity.ok(EventResponse.from(event)))
                 .orElse(ResponseEntity.notFound().build());
     }
