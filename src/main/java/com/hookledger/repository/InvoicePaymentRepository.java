@@ -1,6 +1,7 @@
 package com.hookledger.repository;
 
 import com.hookledger.domain.InvoicePayment;
+import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -9,4 +10,9 @@ public interface InvoicePaymentRepository extends JpaRepository<InvoicePayment, 
 
     @Query("SELECT COALESCE(SUM(p.amountMinor), 0) FROM InvoicePayment p WHERE p.invoice.invoiceId = :invoiceId")
     long sumAmountMinorByInvoiceId(@Param("invoiceId") String invoiceId);
+
+    @Query(
+            "SELECT p FROM InvoicePayment p JOIN p.invoice i WHERE i.customerName = :customerName AND p.currency = :currency")
+    List<InvoicePayment> findByCustomerNameAndCurrency(
+            @Param("customerName") String customerName, @Param("currency") String currency);
 }
