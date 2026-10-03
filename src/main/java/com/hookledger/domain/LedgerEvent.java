@@ -59,6 +59,21 @@ public class LedgerEvent {
     @Column(name = "reverses_event_id", length = 128)
     private String reversesEventId;
 
+    @Column(name = "fee_charge_id", length = 128)
+    private String feeChargeId;
+
+    @Column(name = "fx_rate", length = 64)
+    private String fxRate;
+
+    @Column(name = "fx_converted_amount_minor")
+    private Long fxConvertedAmountMinor;
+
+    @Column(name = "fx_counter_currency", length = 3)
+    private String fxCounterCurrency;
+
+    @Column(name = "fx_inbound")
+    private Boolean fxInbound;
+
     protected LedgerEvent() {}
 
     public LedgerEvent(
@@ -72,7 +87,23 @@ public class LedgerEvent {
             Instant receivedAt,
             String refundChargeId,
             List<String> payoutChargeIds) {
-        this(eventId, type, amountMinor, debitMinor, creditMinor, currency, rawPayload, receivedAt, refundChargeId, payoutChargeIds, null);
+        this(
+                eventId,
+                type,
+                amountMinor,
+                debitMinor,
+                creditMinor,
+                currency,
+                rawPayload,
+                receivedAt,
+                refundChargeId,
+                payoutChargeIds,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
     }
 
     public LedgerEvent(
@@ -87,6 +118,42 @@ public class LedgerEvent {
             String refundChargeId,
             List<String> payoutChargeIds,
             String reversesEventId) {
+        this(
+                eventId,
+                type,
+                amountMinor,
+                debitMinor,
+                creditMinor,
+                currency,
+                rawPayload,
+                receivedAt,
+                refundChargeId,
+                payoutChargeIds,
+                reversesEventId,
+                null,
+                null,
+                null,
+                null,
+                null);
+    }
+
+    public LedgerEvent(
+            String eventId,
+            MoneyEventType type,
+            long amountMinor,
+            long debitMinor,
+            long creditMinor,
+            String currency,
+            String rawPayload,
+            Instant receivedAt,
+            String refundChargeId,
+            List<String> payoutChargeIds,
+            String reversesEventId,
+            String feeChargeId,
+            String fxRate,
+            Long fxConvertedAmountMinor,
+            String fxCounterCurrency,
+            Boolean fxInbound) {
         this.eventId = eventId;
         this.type = type;
         this.amountMinor = amountMinor;
@@ -100,6 +167,11 @@ public class LedgerEvent {
         this.refundChargeId = refundChargeId;
         this.payoutChargeIdsJson = encodeChargeIds(payoutChargeIds);
         this.reversesEventId = reversesEventId;
+        this.feeChargeId = feeChargeId;
+        this.fxRate = fxRate;
+        this.fxConvertedAmountMinor = fxConvertedAmountMinor;
+        this.fxCounterCurrency = fxCounterCurrency;
+        this.fxInbound = fxInbound;
     }
 
     public String getEventId() {
@@ -152,6 +224,30 @@ public class LedgerEvent {
 
     public String getReversesEventId() {
         return reversesEventId;
+    }
+
+    public String getFeeChargeId() {
+        return feeChargeId;
+    }
+
+    public String getFxRate() {
+        return fxRate;
+    }
+
+    public Long getFxConvertedAmountMinor() {
+        return fxConvertedAmountMinor;
+    }
+
+    public String getFxCounterCurrency() {
+        return fxCounterCurrency;
+    }
+
+    public Boolean getFxInbound() {
+        return fxInbound;
+    }
+
+    public boolean isFxInbound() {
+        return Boolean.TRUE.equals(fxInbound);
     }
 
     public boolean isReversal() {

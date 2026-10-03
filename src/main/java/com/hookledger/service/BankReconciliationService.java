@@ -1,6 +1,7 @@
 package com.hookledger.service;
 
 import com.hookledger.domain.BankLine;
+import com.hookledger.domain.LedgerAuditAction;
 import com.hookledger.domain.BankLineCombinationCharge;
 import com.hookledger.domain.EventStateFlags;
 import com.hookledger.domain.LedgerEvent;
@@ -24,16 +25,19 @@ public class BankReconciliationService {
     private final LedgerEventRepository ledgerEventRepository;
     private final BankLineCombinationChargeRepository combinationChargeRepository;
     private final PayoutSplitChargeRepository payoutSplitChargeRepository;
+    private final LedgerAuditService ledgerAuditService;
 
     public BankReconciliationService(
             BankLineRepository bankLineRepository,
             LedgerEventRepository ledgerEventRepository,
             BankLineCombinationChargeRepository combinationChargeRepository,
-            PayoutSplitChargeRepository payoutSplitChargeRepository) {
+            PayoutSplitChargeRepository payoutSplitChargeRepository,
+            LedgerAuditService ledgerAuditService) {
         this.bankLineRepository = bankLineRepository;
         this.ledgerEventRepository = ledgerEventRepository;
         this.combinationChargeRepository = combinationChargeRepository;
         this.payoutSplitChargeRepository = payoutSplitChargeRepository;
+        this.ledgerAuditService = ledgerAuditService;
     }
 
     @Transactional
@@ -83,7 +87,9 @@ public class BankReconciliationService {
             throw new BankReconciliationException("ledger entry is already matched to a bank line");
         }
         bankLine.matchTo(ledgerEventId, Instant.now());
-        return Optional.of(bankLineRepository.save(bankLine));
+        BankLine saved = bankLineRepository.save(bankLine);
+        ledgerAuditService.record(ledgerEventId, LedgerAuditAction.match, "bankLineId=" + bankLineId);
+        return Optional.of(saved);
     }
 
     @Transactional
@@ -140,6 +146,10 @@ public class BankReconciliationService {
         }
         bankLine.markCombinationMatched(matchedAt);
         bankLineRepository.save(bankLine);
+        for (String chargeId : combination.get()) {
+            ledgerAuditService.record(
+                    chargeId, LedgerAuditAction.match, "bankLineId=" + bankLineId + ";combination=true");
+        }
         return Optional.of(new CombinationMatchResult(bankLine, combination.get()));
     }
 

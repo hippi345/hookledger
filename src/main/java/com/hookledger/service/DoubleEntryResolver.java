@@ -20,6 +20,9 @@ final class DoubleEntryResolver {
         return switch (payload.type()) {
             case charge -> new DoubleEntrySides(amount, -amount);
             case refund, payout -> new DoubleEntrySides(-amount, amount);
+            case fee -> new DoubleEntrySides(amount, -amount);
+            case fx_conversion ->
+                    throw new InvalidMoneyEventException("fx_conversion must be created via /api/fx-conversions");
         };
     }
 

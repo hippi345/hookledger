@@ -19,13 +19,24 @@ public final class LedgerAccountPosting {
             case charge -> new AccountPair("cash", "revenue");
             case refund -> new AccountPair("revenue", "cash");
             case payout -> new AccountPair("payout_clearing", "cash");
+            case fee -> new AccountPair("revenue", "cash");
+            case fx_conversion -> new AccountPair("payout_clearing", "cash");
         };
+    }
+
+    public static AccountPair accountsForFx(LedgerEvent event) {
+        if (event.isFxInbound()) {
+            return new AccountPair("cash", "payout_clearing");
+        }
+        return new AccountPair("payout_clearing", "cash");
     }
 
     public static Posting postingForAccount(LedgerEvent event, String account) {
         long debitLeg = Math.abs(event.getDebitMinor());
         long creditLeg = Math.abs(event.getCreditMinor());
-        AccountPair pair = accountsFor(event.getType());
+        AccountPair pair = event.getType() == MoneyEventType.fx_conversion
+                ? accountsForFx(event)
+                : accountsFor(event.getType());
         if (event.isReversal()) {
             pair = new AccountPair(pair.creditAccount(), pair.debitAccount());
         }

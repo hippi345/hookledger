@@ -22,7 +22,12 @@ public record EventResponse(
         boolean reversed,
         String reversesEventId,
         String refundChargeId,
-        List<String> payoutChargeIds) {
+        List<String> payoutChargeIds,
+        String feeChargeId,
+        String fxRate,
+        Long fxConvertedAmountMinor,
+        String fxCounterCurrency,
+        Boolean fxInbound) {
 
     public static EventResponse from(LedgerEvent event) {
         int flags = event.getStateFlags();
@@ -42,6 +47,11 @@ public record EventResponse(
                 EventStateFlags.isReversed(flags),
                 event.getReversesEventId(),
                 event.getRefundChargeId(),
-                event.getPayoutChargeIds());
+                event.getPayoutChargeIds(),
+                event.getFeeChargeId(),
+                event.getFxRate(),
+                event.getFxConvertedAmountMinor(),
+                event.getFxCounterCurrency(),
+                event.getFxInbound());
     }
 }
