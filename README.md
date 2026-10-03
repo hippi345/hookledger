@@ -82,15 +82,16 @@ curl -sS -X POST http://localhost:8080/api/webhooks \
 | `GET` | `/api/events/{eventId}/audit` | Append-only audit rows for one event id |
 | `POST` | `/api/fx-conversions` | Convert between currencies at a stored rate (balanced legs) |
 | `POST` | `/api/invoices` | Create an invoice with customer, due date, and line items (not posted to the ledger) |
+| `POST` | `/api/invoices/{id}/credits` | Apply a credit note to an unpaid invoice (reduces open balance; does not post to the ledger) |
 | `POST` | `/api/invoices/{id}/pay` | Mark an invoice paid and post a balanced `charge` to the ledger |
 | `GET` | `/api/invoices/{id}/pdf` | Download the invoice as a PDF (`application/pdf`) |
 | `GET` | `/api/invoices/aging` | Unpaid invoice aging by days past due (optional `asOf` date, default today); does not post to the ledger |
 
 ### Invoices
 
-Invoices are stored separately from ledger events. `POST /api/invoices` accepts `customerName`, optional `customerAddress`, `dueDate` (ISO-8601 date), `currency`, and `lineItems` (`description`, `amountMinor`). Amounts use minor units in the given currency; line items must sum to a positive total. Nothing is posted to the ledger until `POST /api/invoices/{id}/pay`, which creates a balanced charge (`debitMinor` positive, `creditMinor` negative, sum zero) linked to the invoice. Invoice rows are never deleted.
+Invoices are stored separately from ledger events. `POST /api/invoices` accepts `customerName`, optional `customerAddress`, `dueDate` (ISO-8601 date), `currency`, and `lineItems` (`description`, `amountMinor`). Amounts use minor units in the given currency; line items must sum to a positive total. `POST /api/invoices/{id}/credits` applies a credit note (`amountMinor`, matching `currency`) against an unpaid invoice; credits do not post to the ledger. Remaining open balance is the original line-item total minus applied credits. Nothing is posted to the ledger until `POST /api/invoices/{id}/pay`, which creates a balanced charge (`debitMinor` positive, `creditMinor` negative, sum zero) for the remaining open amount only (a fully credited invoice is treated as settled and does not post a charge). Invoice rows are never deleted.
 
-`GET /api/invoices/aging` returns unpaid invoices grouped by currency into aging buckets (`current`, `30`, `60`, `90`, `over90`) using **linear classification** by calendar days past due relative to optional `asOf` (ISO-8601 date, default the server’s current date). Each line shows invoice id, customer, due date, currency, and open amount in minor units (today the full unpaid total; pay is all-or-nothing). Responses include per-bucket totals and a grand total per currency.
+`GET /api/invoices/aging` returns unpaid invoices grouped by currency into aging buckets (`current`, `30`, `60`, `90`, `over90`) using **linear classification** by calendar days past due relative to optional `asOf` (ISO-8601 date, default the server’s current date). Each line shows invoice id, customer, due date, currency, and open amount in minor units (original total minus applied credits). Fully credited invoices are omitted. Responses include per-bucket totals and a grand total per currency.
 
 Sample generated PDF (fictional customer):
 

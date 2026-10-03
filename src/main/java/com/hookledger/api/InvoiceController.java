@@ -57,6 +57,16 @@ public class InvoiceController {
         return ResponseEntity.status(HttpStatus.CREATED).body(InvoiceResponse.from(invoice));
     }
 
+    @PostMapping("/{invoiceId}/credits")
+    @Operation(summary = "Apply a credit note to an unpaid invoice (does not post to the ledger)")
+    public ResponseEntity<InvoiceCreditNoteResponse> applyCredit(
+            @PathVariable String invoiceId, @RequestBody CreateInvoiceCreditRequest request) {
+        return invoiceService
+                .applyCredit(invoiceId, request.amountMinor(), request.currency())
+                .map(credit -> ResponseEntity.status(HttpStatus.CREATED).body(InvoiceCreditNoteResponse.from(credit)))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     @PostMapping("/{invoiceId}/pay")
     @Operation(summary = "Mark an invoice paid and post a balanced charge to the ledger")
     public ResponseEntity<InvoiceResponse> pay(@PathVariable String invoiceId) {
