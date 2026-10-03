@@ -21,6 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -111,6 +112,29 @@ class CustomerStatementHttpIntegrationTest extends AbstractPostgresIntegrationTe
         assertThat(body.lines().get(2).id()).isEqualTo(payment.getPaymentId());
         assertThat(body.lines().get(2).amountMinor()).isEqualTo(1000);
         assertThat(body.lines().get(2).balanceMinor()).isEqualTo(4500);
+    }
+
+    @Test
+    void customerStatementPdfReturnsPdfBytes() {
+        saveInvoice(CUSTOMER, LocalDate.parse("2026-01-15"), "USD", 4000);
+
+        Invoice inRangeInvoice = saveInvoice(CUSTOMER, LocalDate.parse("2026-02-05"), "USD", 2000);
+        saveCredit(inRangeInvoice, LocalDate.parse("2026-02-10"), 500);
+        savePayment(inRangeInvoice, LocalDate.parse("2026-02-15"), 1000);
+
+        String url = UriComponentsBuilder.fromPath("/api/customers/{customer}/statement.pdf")
+                .queryParam("currency", "usd")
+                .queryParam("from", FROM)
+                .queryParam("to", TO)
+                .buildAndExpand(CUSTOMER)
+                .toUriString();
+
+        ResponseEntity<byte[]> response = restTemplate.getForEntity(url, byte[].class);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_PDF);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().length).isGreaterThan(100);
+        assertThat(new String(response.getBody(), 0, 4)).isEqualTo("%PDF");
     }
 
     private Invoice saveInvoice(String customer, LocalDate activityDate, String currency, long totalMinor) {
