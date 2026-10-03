@@ -73,11 +73,15 @@ public class BankLine {
     }
 
     public boolean isMatched() {
-        return matchedLedgerEventId != null;
+        return matchedAt != null;
     }
 
     public void matchTo(String ledgerEventId, Instant matchedAt) {
         this.matchedLedgerEventId = ledgerEventId;
+        this.matchedAt = matchedAt;
+    }
+
+    public void markCombinationMatched(Instant matchedAt) {
         this.matchedAt = matchedAt;
     }
 }

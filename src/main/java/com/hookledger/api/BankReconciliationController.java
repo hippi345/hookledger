@@ -40,6 +40,15 @@ public class BankReconciliationController {
                 .toList();
     }
 
+    @GetMapping("/{bankLineId}/match-suggestion")
+    @Operation(summary = "Suggest the oldest unmatched ledger entry for a bank line (does not apply)")
+    public ResponseEntity<BankLineMatchSuggestionResponse> suggestMatch(@PathVariable String bankLineId) {
+        return bankReconciliationService
+                .suggestMatch(bankLineId)
+                .map(ledgerEventId -> ResponseEntity.ok(new BankLineMatchSuggestionResponse(bankLineId, ledgerEventId)))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     @PostMapping("/{bankLineId}/match")
     @Operation(summary = "Match a bank line to one ledger entry (same amount and currency)")
     public ResponseEntity<BankLineResponse> match(
@@ -47,6 +56,25 @@ public class BankReconciliationController {
         return bankReconciliationService
                 .match(bankLineId, request.ledgerEventId())
                 .map(line -> ResponseEntity.ok(BankLineResponse.from(line)))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/{bankLineId}/match-greedy")
+    @Operation(summary = "Greedy match to the oldest unmatched ledger entry with the same amount and currency")
+    public ResponseEntity<BankLineResponse> matchGreedy(@PathVariable String bankLineId) {
+        return bankReconciliationService
+                .matchGreedy(bankLineId)
+                .map(line -> ResponseEntity.ok(BankLineResponse.from(line)))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/{bankLineId}/match-combination")
+    @Operation(summary = "Match a bank line to a combination of charges that sum to its amount")
+    public ResponseEntity<BankLineCombinationMatchResponse> matchCombination(@PathVariable String bankLineId) {
+        return bankReconciliationService
+                .matchCombination(bankLineId)
+                .map(result -> ResponseEntity.ok(BankLineCombinationMatchResponse.from(
+                        result.bankLine(), result.matchedChargeIds())))
                 .orElse(ResponseEntity.notFound().build());
     }
 }

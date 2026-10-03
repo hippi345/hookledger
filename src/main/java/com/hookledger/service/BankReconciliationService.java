@@ -1,11 +1,17 @@
 package com.hookledger.service;
 
 import com.hookledger.domain.BankLine;
+import com.hookledger.domain.BankLineCombinationCharge;
+import com.hookledger.domain.EventStateFlags;
 import com.hookledger.domain.LedgerEvent;
+import com.hookledger.domain.MoneyEventType;
+import com.hookledger.repository.BankLineCombinationChargeRepository;
 import com.hookledger.repository.BankLineRepository;
 import com.hookledger.repository.LedgerEventRepository;
+import com.hookledger.repository.PayoutSplitChargeRepository;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
@@ -16,11 +22,18 @@ public class BankReconciliationService {
 
     private final BankLineRepository bankLineRepository;
     private final LedgerEventRepository ledgerEventRepository;
+    private final BankLineCombinationChargeRepository combinationChargeRepository;
+    private final PayoutSplitChargeRepository payoutSplitChargeRepository;
 
     public BankReconciliationService(
-            BankLineRepository bankLineRepository, LedgerEventRepository ledgerEventRepository) {
+            BankLineRepository bankLineRepository,
+            LedgerEventRepository ledgerEventRepository,
+            BankLineCombinationChargeRepository combinationChargeRepository,
+            PayoutSplitChargeRepository payoutSplitChargeRepository) {
         this.bankLineRepository = bankLineRepository;
         this.ledgerEventRepository = ledgerEventRepository;
+        this.combinationChargeRepository = combinationChargeRepository;
+        this.payoutSplitChargeRepository = payoutSplitChargeRepository;
     }
 
     @Transactional
@@ -40,7 +53,7 @@ public class BankReconciliationService {
 
     @Transactional(readOnly = true)
     public List<BankLine> listUnmatched() {
-        return bankLineRepository.findByMatchedLedgerEventIdIsNullOrderByCreatedAtAsc();
+        return bankLineRepository.findByMatchedAtIsNullOrderByCreatedAtAsc();
     }
 
     @Transactional
@@ -72,4 +85,95 @@ public class BankReconciliationService {
         bankLine.matchTo(ledgerEventId, Instant.now());
         return Optional.of(bankLineRepository.save(bankLine));
     }
+
+    @Transactional
+    public Optional<BankLine> matchGreedy(String bankLineId) {
+        Optional<BankLine> bankLineOpt = bankLineRepository.findById(bankLineId);
+        if (bankLineOpt.isEmpty()) {
+            return Optional.empty();
+        }
+        BankLine bankLine = bankLineOpt.get();
+        if (bankLine.isMatched()) {
+            throw new BankReconciliationException("bank line is already matched");
+        }
+        Optional<LedgerEvent> ledgerOpt = oldestUnmatchedLedgerEntry(bankLine);
+        if (ledgerOpt.isEmpty()) {
+            throw new BankReconciliationException("no unmatched ledger entry matches this bank line");
+        }
+        return match(bankLineId, ledgerOpt.get().getEventId());
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<String> suggestMatch(String bankLineId) {
+        Optional<BankLine> bankLineOpt = bankLineRepository.findById(bankLineId);
+        if (bankLineOpt.isEmpty()) {
+            return Optional.empty();
+        }
+        BankLine bankLine = bankLineOpt.get();
+        if (bankLine.isMatched()) {
+            throw new BankReconciliationException("bank line is already matched");
+        }
+        return oldestUnmatchedLedgerEntry(bankLine).map(LedgerEvent::getEventId);
+    }
+
+    @Transactional
+    public Optional<CombinationMatchResult> matchCombination(String bankLineId) {
+        Optional<BankLine> bankLineOpt = bankLineRepository.findById(bankLineId);
+        if (bankLineOpt.isEmpty()) {
+            return Optional.empty();
+        }
+        BankLine bankLine = bankLineOpt.get();
+        if (bankLine.isMatched()) {
+            throw new BankReconciliationException("bank line is already matched");
+        }
+
+        List<LedgerEvent> charges = availableChargesForCombination(bankLine.getCurrency());
+        Optional<List<String>> combination = ChargeSubsetAlgorithms.firstCombinationSummingTo(
+                charges, bankLine.getAmountMinor());
+        if (combination.isEmpty()) {
+            throw new BankReconciliationException("no charge combination sums to the bank line amount");
+        }
+
+        Instant matchedAt = Instant.now();
+        for (String chargeId : combination.get()) {
+            combinationChargeRepository.save(new BankLineCombinationCharge(bankLineId, chargeId));
+        }
+        bankLine.markCombinationMatched(matchedAt);
+        bankLineRepository.save(bankLine);
+        return Optional.of(new CombinationMatchResult(bankLine, combination.get()));
+    }
+
+    private Optional<LedgerEvent> oldestUnmatchedLedgerEntry(BankLine bankLine) {
+        return ledgerEventRepository.findAllByOrderByReceivedAtAsc().stream()
+                .filter(event -> event.getAmountMinor() == bankLine.getAmountMinor())
+                .filter(event -> bankLine.getCurrency().equals(event.getCurrency()))
+                .filter(event -> !bankLineRepository.existsByMatchedLedgerEventId(event.getEventId()))
+                .findFirst();
+    }
+
+    private List<LedgerEvent> availableChargesForCombination(String currency) {
+        List<LedgerEvent> result = new ArrayList<>();
+        for (LedgerEvent event : ledgerEventRepository.findByTypeOrderByAmountMinorDesc(MoneyEventType.charge)) {
+            if (!event.getCurrency().equals(currency)) {
+                continue;
+            }
+            if (event.isReversal() || EventStateFlags.isReversed(event.getStateFlags())) {
+                continue;
+            }
+            if (bankLineRepository.existsByMatchedLedgerEventId(event.getEventId())) {
+                continue;
+            }
+            if (combinationChargeRepository.existsByChargeEventId(event.getEventId())) {
+                continue;
+            }
+            if (payoutSplitChargeRepository.existsByChargeEventId(event.getEventId())) {
+                continue;
+            }
+            result.add(event);
+        }
+        result.sort(java.util.Comparator.comparing(LedgerEvent::getReceivedAt));
+        return result;
+    }
+
+    public record CombinationMatchResult(BankLine bankLine, List<String> matchedChargeIds) {}
 }

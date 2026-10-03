@@ -6,7 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface BankLineRepository extends JpaRepository<BankLine, String> {
 
-    List<BankLine> findByMatchedLedgerEventIdIsNullOrderByCreatedAtAsc();
+    List<BankLine> findByMatchedAtIsNullOrderByCreatedAtAsc();
 
     boolean existsByMatchedLedgerEventId(String ledgerEventId);
 }
