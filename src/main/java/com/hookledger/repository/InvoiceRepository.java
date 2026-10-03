@@ -55,4 +55,11 @@ public interface InvoiceRepository extends JpaRepository<Invoice, String> {
             @Param("invoiceStatus") InvoiceStatus invoiceStatus,
             @Param("currency") String currency,
             Pageable pageable);
+
+    @Query(
+            "SELECT DISTINCT i FROM Invoice i LEFT JOIN FETCH i.lineItems WHERE i.customerName = :customerName AND i.currency = :currency AND i.status = :status")
+    List<Invoice> findOpenByCustomerNameAndCurrencyWithLineItems(
+            @Param("customerName") String customerName,
+            @Param("currency") String currency,
+            @Param("status") InvoiceStatus status);
 }

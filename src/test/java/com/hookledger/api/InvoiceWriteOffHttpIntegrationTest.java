@@ -3,6 +3,7 @@ package com.hookledger.api;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.hookledger.AbstractPostgresIntegrationTest;
+import com.hookledger.domain.InvoiceStatus;
 import com.hookledger.repository.InvoiceCreditNoteRepository;
 import com.hookledger.repository.InvoiceLateFeeRepository;
 import com.hookledger.repository.InvoicePaymentRepository;
@@ -21,7 +22,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class CustomerSearchHttpIntegrationTest extends AbstractPostgresIntegrationTest {
+class InvoiceWriteOffHttpIntegrationTest extends AbstractPostgresIntegrationTest {
+
+    private static final LocalDate AS_OF = LocalDate.parse("2026-06-15");
 
     @Autowired
     private TestRestTemplate restTemplate;
@@ -59,36 +62,32 @@ class CustomerSearchHttpIntegrationTest extends AbstractPostgresIntegrationTest 
     }
 
     @Test
-    void customerSearchIsCaseInsensitivePrefixScan() {
-        createInvoice("Alpha Industries", LocalDate.parse("2026-04-01"), "usd", 100);
-        createInvoice("alpha workshop", LocalDate.parse("2026-04-02"), "usd", 200);
-        createInvoice("Beta LLC", LocalDate.parse("2026-04-03"), "usd", 300);
-        createInvoice("Alpine Gear", LocalDate.parse("2026-04-04"), "usd", 400);
+    void writeOffPostsBalancedChargeAndRemovesInvoiceFromAging() {
+        InvoiceResponse invoice = createInvoice("Write Off Co", AS_OF.minusDays(5), "usd", 4200);
 
-        ResponseEntity<CustomerNameListResponse> all =
-                restTemplate.getForEntity("/api/customers", CustomerNameListResponse.class);
-        assertThat(all.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(all.getBody()).isNotNull();
-        assertThat(all.getBody().customers())
-                .containsExactly("Alpha Industries", "Alpine Gear", "Beta LLC", "alpha workshop");
+        ResponseEntity<InvoiceResponse> writtenOff =
+                restTemplate.postForEntity("/api/invoices/" + invoice.id() + "/write-off", null, InvoiceResponse.class);
+        assertThat(writtenOff.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(writtenOff.getBody()).isNotNull();
+        assertThat(writtenOff.getBody().status()).isEqualTo(InvoiceStatus.paid);
+        assertThat(ledgerEventRepository.count()).isEqualTo(1);
 
-        ResponseEntity<CustomerNameListResponse> alphaPrefix =
-                restTemplate.getForEntity("/api/customers?q=al", CustomerNameListResponse.class);
-        assertThat(alphaPrefix.getBody()).isNotNull();
-        assertThat(alphaPrefix.getBody().customers())
-                .containsExactly("Alpha Industries", "Alpine Gear", "alpha workshop");
+        var charge = ledgerEventRepository.findById(writtenOff.getBody().ledgerEventId()).orElseThrow();
+        assertThat(charge.getAmountMinor()).isEqualTo(4200);
+        assertThat(charge.getDebitMinor() + charge.getCreditMinor()).isZero();
 
-        ResponseEntity<CustomerNameListResponse> betaPrefix =
-                restTemplate.getForEntity("/api/customers?q=Be", CustomerNameListResponse.class);
-        assertThat(betaPrefix.getBody()).isNotNull();
-        assertThat(betaPrefix.getBody().customers()).containsExactly("Beta LLC");
+        ResponseEntity<InvoiceAgingResponse> aging =
+                restTemplate.getForEntity("/api/invoices/aging?asOf=" + AS_OF, InvoiceAgingResponse.class);
+        assertThat(aging.getBody()).isNotNull();
+        assertThat(aging.getBody().currencies()).isEmpty();
     }
 
-    private void createInvoice(String customer, LocalDate dueDate, String currency, long amountMinor) {
+    private InvoiceResponse createInvoice(String customer, LocalDate dueDate, String currency, long amountMinor) {
         CreateInvoiceRequest request = new CreateInvoiceRequest(
                 customer, null, dueDate, currency, List.of(new InvoiceLineItemRequest("Service", amountMinor, null)));
         ResponseEntity<InvoiceResponse> created =
                 restTemplate.postForEntity("/api/invoices", request, InvoiceResponse.class);
         assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        return created.getBody();
     }
 }

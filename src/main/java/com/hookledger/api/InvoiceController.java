@@ -100,7 +100,10 @@ public class InvoiceController {
         var lineItems = request.lineItems() == null
                 ? List.<InvoiceService.LineItemInput>of()
                 : request.lineItems().stream()
-                        .map(item -> new InvoiceService.LineItemInput(item.description(), item.amountMinor()))
+                        .map(item -> new InvoiceService.LineItemInput(
+                                item.description(),
+                                item.amountMinor(),
+                                item.taxRateBasisPoints() != null ? item.taxRateBasisPoints() : 0))
                         .toList();
         var invoice = invoiceService.create(
                 request.customerName(),
@@ -146,6 +149,15 @@ public class InvoiceController {
     public ResponseEntity<InvoiceResponse> voidInvoice(@PathVariable String invoiceId) {
         return invoiceService
                 .voidInvoice(invoiceId)
+                .map(invoice -> ResponseEntity.ok(InvoiceResponse.from(invoice)))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/{invoiceId}/write-off")
+    @Operation(summary = "Write off the remaining open balance and post a balanced charge to the ledger")
+    public ResponseEntity<InvoiceResponse> writeOff(@PathVariable String invoiceId) {
+        return invoiceService
+                .writeOff(invoiceId)
                 .map(invoice -> ResponseEntity.ok(InvoiceResponse.from(invoice)))
                 .orElse(ResponseEntity.notFound().build());
     }

@@ -149,7 +149,7 @@ class CustomerStatementHttpIntegrationTest extends AbstractPostgresIntegrationTe
                 activityDate.plusDays(30),
                 currency,
                 activityDate.atStartOfDay(ZoneOffset.UTC).toInstant());
-        invoice.addLineItem(new InvoiceLineItem(invoice, 0, "Line", totalMinor));
+        invoice.addLineItem(new InvoiceLineItem(invoice, 0, "Line", totalMinor, 0));
         return invoiceRepository.saveAndFlush(invoice);
     }
 
