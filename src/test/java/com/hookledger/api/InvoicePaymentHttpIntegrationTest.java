@@ -24,7 +24,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class InvoiceCreditHttpIntegrationTest extends AbstractPostgresIntegrationTest {
+class InvoicePaymentHttpIntegrationTest extends AbstractPostgresIntegrationTest {
 
     private static final LocalDate AS_OF = LocalDate.parse("2026-06-15");
 
@@ -60,15 +60,18 @@ class InvoiceCreditHttpIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    void partialCreditReducesAgingOpenAmount() {
-        InvoiceResponse invoice = createInvoice("Credit Test Co", AS_OF.minusDays(10), "usd", 5000);
+    void partialPaymentReducesAgingAndPostsMatchingCharge() {
+        InvoiceResponse invoice = createInvoice("Partial Pay Co", AS_OF.minusDays(10), "usd", 5000);
 
-        ResponseEntity<InvoiceCreditNoteResponse> credit = restTemplate.postForEntity(
-                "/api/invoices/" + invoice.id() + "/credits",
-                new CreateInvoiceCreditRequest(2000, "usd"),
-                InvoiceCreditNoteResponse.class);
-        assertThat(credit.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(ledgerEventRepository.count()).isZero();
+        ResponseEntity<InvoicePaymentResponse> firstPayment = postPayment(invoice.id(), 2000, "usd");
+        assertThat(firstPayment.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(firstPayment.getBody()).isNotNull();
+        assertThat(ledgerEventRepository.count()).isEqualTo(1);
+
+        var charge = ledgerEventRepository.findById(firstPayment.getBody().ledgerEventId()).orElseThrow();
+        assertThat(charge.getAmountMinor()).isEqualTo(2000);
+        assertThat(charge.getDebitMinor()).isEqualTo(2000);
+        assertThat(charge.getCreditMinor()).isEqualTo(-2000);
 
         ResponseEntity<InvoiceAgingResponse> aging =
                 restTemplate.getForEntity("/api/invoices/aging?asOf=" + AS_OF, InvoiceAgingResponse.class);
@@ -83,45 +86,40 @@ class InvoiceCreditHttpIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    void fullCreditRemovesInvoiceFromAging() {
-        InvoiceResponse invoice = createInvoice("Fully Credited Co", AS_OF.minusDays(5), "usd", 4000);
+    void payingRemainderRemovesInvoiceFromAging() {
+        InvoiceResponse invoice = createInvoice("Finish Pay Co", AS_OF.minusDays(5), "usd", 4000);
 
-        assertThat(postCredit(invoice.id(), 1500, "usd").getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(postCredit(invoice.id(), 2500, "usd").getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(ledgerEventRepository.count()).isZero();
+        assertThat(postPayment(invoice.id(), 1500, "usd").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(postPayment(invoice.id(), 2500, "usd").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(ledgerEventRepository.count()).isEqualTo(2);
 
         ResponseEntity<InvoiceAgingResponse> aging =
                 restTemplate.getForEntity("/api/invoices/aging?asOf=" + AS_OF, InvoiceAgingResponse.class);
         assertThat(aging.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(aging.getBody()).isNotNull();
         assertThat(aging.getBody().currencies()).isEmpty();
+
+        assertThat(invoiceRepository.findById(invoice.id())).isPresent();
+        assertThat(invoiceRepository.findById(invoice.id()).orElseThrow().getStatus()).isEqualTo(InvoiceStatus.paid);
     }
 
     @Test
-    void payPartiallyCreditedInvoiceChargesOpenBalanceOnly() {
-        InvoiceResponse invoice = createInvoice("Pay After Credit Co", LocalDate.parse("2026-04-15"), "usd", 3250);
+    void overpaymentIsRejected() {
+        InvoiceResponse invoice = createInvoice("Overpay Co", AS_OF, "usd", 1000);
 
-        assertThat(postCredit(invoice.id(), 750, "usd").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<String> rejected = restTemplate.postForEntity(
+                "/api/invoices/" + invoice.id() + "/payments",
+                new CreateInvoicePaymentRequest(1001, "usd"),
+                String.class);
+        assertThat(rejected.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(ledgerEventRepository.count()).isZero();
-
-        ResponseEntity<InvoiceResponse> paid =
-                restTemplate.postForEntity("/api/invoices/" + invoice.id() + "/pay", null, InvoiceResponse.class);
-        assertThat(paid.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(paid.getBody()).isNotNull();
-        assertThat(paid.getBody().status()).isEqualTo(InvoiceStatus.paid);
-        assertThat(ledgerEventRepository.count()).isEqualTo(1);
-
-        var charge = ledgerEventRepository.findById(paid.getBody().ledgerEventId()).orElseThrow();
-        assertThat(charge.getAmountMinor()).isEqualTo(2500);
-        assertThat(charge.getDebitMinor()).isEqualTo(2500);
-        assertThat(charge.getCreditMinor()).isEqualTo(-2500);
     }
 
-    private ResponseEntity<InvoiceCreditNoteResponse> postCredit(String invoiceId, long amountMinor, String currency) {
+    private ResponseEntity<InvoicePaymentResponse> postPayment(String invoiceId, long amountMinor, String currency) {
         return restTemplate.postForEntity(
-                "/api/invoices/" + invoiceId + "/credits",
-                new CreateInvoiceCreditRequest(amountMinor, currency),
-                InvoiceCreditNoteResponse.class);
+                "/api/invoices/" + invoiceId + "/payments",
+                new CreateInvoicePaymentRequest(amountMinor, currency),
+                InvoicePaymentResponse.class);
     }
 
     private InvoiceResponse createInvoice(String customer, LocalDate dueDate, String currency, long amountMinor) {

@@ -3,6 +3,7 @@ package com.hookledger.service;
 import com.hookledger.domain.Invoice;
 import com.hookledger.domain.InvoiceStatus;
 import com.hookledger.repository.InvoiceCreditNoteRepository;
+import com.hookledger.repository.InvoicePaymentRepository;
 import com.hookledger.repository.InvoiceRepository;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
@@ -20,11 +21,15 @@ public class InvoiceAgingService {
 
     private final InvoiceRepository invoiceRepository;
     private final InvoiceCreditNoteRepository invoiceCreditNoteRepository;
+    private final InvoicePaymentRepository invoicePaymentRepository;
 
     public InvoiceAgingService(
-            InvoiceRepository invoiceRepository, InvoiceCreditNoteRepository invoiceCreditNoteRepository) {
+            InvoiceRepository invoiceRepository,
+            InvoiceCreditNoteRepository invoiceCreditNoteRepository,
+            InvoicePaymentRepository invoicePaymentRepository) {
         this.invoiceRepository = invoiceRepository;
         this.invoiceCreditNoteRepository = invoiceCreditNoteRepository;
+        this.invoicePaymentRepository = invoicePaymentRepository;
     }
 
     @Transactional(readOnly = true)
@@ -33,8 +38,8 @@ public class InvoiceAgingService {
 
         Map<String, MutableCurrencyAging> byCurrency = new TreeMap<>();
         for (Invoice invoice : openInvoices) {
-            long openAmountMinor =
-                    InvoiceOpenBalance.openAmountMinor(invoice, invoiceCreditNoteRepository);
+            long openAmountMinor = InvoiceOpenBalance.openAmountMinor(
+                    invoice, invoiceCreditNoteRepository, invoicePaymentRepository);
             if (openAmountMinor <= 0) {
                 continue;
             }

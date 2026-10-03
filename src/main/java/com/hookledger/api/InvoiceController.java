@@ -67,6 +67,16 @@ public class InvoiceController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @PostMapping("/{invoiceId}/payments")
+    @Operation(summary = "Apply a partial payment and post a balanced charge to the ledger")
+    public ResponseEntity<InvoicePaymentResponse> applyPayment(
+            @PathVariable String invoiceId, @RequestBody CreateInvoicePaymentRequest request) {
+        return invoiceService
+                .applyPayment(invoiceId, request.amountMinor(), request.currency())
+                .map(payment -> ResponseEntity.status(HttpStatus.CREATED).body(InvoicePaymentResponse.from(payment)))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     @PostMapping("/{invoiceId}/pay")
     @Operation(summary = "Mark an invoice paid and post a balanced charge to the ledger")
     public ResponseEntity<InvoiceResponse> pay(@PathVariable String invoiceId) {
