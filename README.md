@@ -81,6 +81,17 @@ curl -sS -X POST http://localhost:8080/api/webhooks \
 | `POST` | `/api/payouts/{id}/split` | **Dynamic programming:** split a payout into the fewest available charges that sum to its amount |
 | `GET` | `/api/events/{eventId}/audit` | Append-only audit rows for one event id |
 | `POST` | `/api/fx-conversions` | Convert between currencies at a stored rate (balanced legs) |
+| `POST` | `/api/invoices` | Create an invoice with customer, due date, and line items (not posted to the ledger) |
+| `POST` | `/api/invoices/{id}/pay` | Mark an invoice paid and post a balanced `charge` to the ledger |
+| `GET` | `/api/invoices/{id}/pdf` | Download the invoice as a PDF (`application/pdf`) |
+
+### Invoices
+
+Invoices are stored separately from ledger events. `POST /api/invoices` accepts `customerName`, optional `customerAddress`, `dueDate` (ISO-8601 date), `currency`, and `lineItems` (`description`, `amountMinor`). Amounts use minor units in the given currency; line items must sum to a positive total. Nothing is posted to the ledger until `POST /api/invoices/{id}/pay`, which creates a balanced charge (`debitMinor` positive, `creditMinor` negative, sum zero) linked to the invoice. Invoice rows are never deleted.
+
+Sample generated PDF (fictional customer):
+
+![Sample invoice PDF](docs/sample-invoice.png)
 
 ### Bank reconciliation
 
