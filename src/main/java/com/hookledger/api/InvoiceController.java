@@ -1,6 +1,7 @@
 package com.hookledger.api;
 
 import com.hookledger.service.InvoiceAgingService;
+import com.hookledger.service.InvoiceOverdueService;
 import com.hookledger.service.InvoiceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -26,10 +27,15 @@ public class InvoiceController {
 
     private final InvoiceService invoiceService;
     private final InvoiceAgingService invoiceAgingService;
+    private final InvoiceOverdueService invoiceOverdueService;
 
-    public InvoiceController(InvoiceService invoiceService, InvoiceAgingService invoiceAgingService) {
+    public InvoiceController(
+            InvoiceService invoiceService,
+            InvoiceAgingService invoiceAgingService,
+            InvoiceOverdueService invoiceOverdueService) {
         this.invoiceService = invoiceService;
         this.invoiceAgingService = invoiceAgingService;
+        this.invoiceOverdueService = invoiceOverdueService;
     }
 
     @GetMapping("/aging")
@@ -38,6 +44,14 @@ public class InvoiceController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
         LocalDate effectiveAsOf = asOf != null ? asOf : LocalDate.now();
         return InvoiceAgingResponse.from(invoiceAgingService.buildReport(effectiveAsOf));
+    }
+
+    @GetMapping("/overdue")
+    @Operation(summary = "Overdue unpaid invoices grouped by customer (does not post to the ledger)")
+    public InvoiceOverdueResponse overdue(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
+        LocalDate effectiveAsOf = asOf != null ? asOf : LocalDate.now();
+        return InvoiceOverdueResponse.from(invoiceOverdueService.buildReport(effectiveAsOf));
     }
 
     @PostMapping
