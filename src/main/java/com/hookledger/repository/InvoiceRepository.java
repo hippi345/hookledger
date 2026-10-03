@@ -17,4 +17,11 @@ public interface InvoiceRepository extends JpaRepository<Invoice, String> {
     List<Invoice> findAllByStatusWithLineItems(@Param("status") InvoiceStatus status);
 
     List<Invoice> findByCustomerNameAndCurrency(String customerName, String currency);
+
+    @Query(
+            "SELECT DISTINCT i FROM Invoice i LEFT JOIN FETCH i.lineItems WHERE i.customerName = :customerName AND i.currency = :currency AND i.status = :status")
+    List<Invoice> findOpenByCustomerNameAndCurrencyWithLineItems(
+            @Param("customerName") String customerName,
+            @Param("currency") String currency,
+            @Param("status") InvoiceStatus status);
 }

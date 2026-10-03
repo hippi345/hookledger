@@ -129,7 +129,7 @@ class InvoicePaymentHttpIntegrationTest extends AbstractPostgresIntegrationTest 
 
     private InvoiceResponse createInvoice(String customer, LocalDate dueDate, String currency, long amountMinor) {
         CreateInvoiceRequest request = new CreateInvoiceRequest(
-                customer, null, dueDate, currency, List.of(new InvoiceLineItemRequest("Service", amountMinor)));
+                customer, null, dueDate, currency, List.of(new InvoiceLineItemRequest("Service", amountMinor, null)));
         ResponseEntity<InvoiceResponse> created =
                 restTemplate.postForEntity("/api/invoices", request, InvoiceResponse.class);
         assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);

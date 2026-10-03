@@ -93,7 +93,12 @@ public class InvoiceService {
             if (item.amountMinor() <= 0) {
                 throw new InvoiceException("Line item amountMinor must be positive");
             }
-            invoice.addLineItem(new InvoiceLineItem(invoice, order++, item.description().trim(), item.amountMinor()));
+            int taxRateBasisPoints = item.taxRateBasisPoints();
+            if (taxRateBasisPoints < 0) {
+                throw new InvoiceException("taxRateBasisPoints must not be negative");
+            }
+            invoice.addLineItem(new InvoiceLineItem(
+                    invoice, order++, item.description().trim(), item.amountMinor(), taxRateBasisPoints));
         }
 
         if (invoice.getTotalAmountMinor() <= 0) {
@@ -204,6 +209,27 @@ public class InvoiceService {
     }
 
     @Transactional
+    public Optional<Invoice> writeOff(String invoiceId) {
+        return invoiceRepository.findByIdWithLineItems(invoiceId).map(invoice -> {
+            if (invoice.getStatus() == InvoiceStatus.paid) {
+                throw new InvoiceException("Invoice is already settled");
+            }
+            long openAmount = openAmountMinor(invoice);
+            if (openAmount <= 0) {
+                throw new InvoiceException("Invoice is already settled");
+            }
+
+            Instant receivedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+            periodCloseService.assertOpenFor(receivedAt);
+
+            String eventId = invoice.writeOffLedgerEventId();
+            postInvoiceCharge(invoice, openAmount, eventId, receivedAt);
+            invoice.markPaid(receivedAt, eventId);
+            return invoiceRepository.save(invoice);
+        });
+    }
+
+    @Transactional
     public Optional<Invoice> markPaid(String invoiceId) {
         return invoiceRepository.findByIdWithLineItems(invoiceId).map(invoice -> {
             if (invoice.getStatus() == InvoiceStatus.paid) {
@@ -303,5 +329,5 @@ public class InvoiceService {
         return customerAddress.trim();
     }
 
-    public record LineItemInput(String description, long amountMinor) {}
+    public record LineItemInput(String description, long amountMinor, int taxRateBasisPoints) {}
 }
