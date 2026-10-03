@@ -31,13 +31,13 @@ Each webhook event `id` is stored at most once: resubmitting the same id returns
 
 Browse stored events at `http://localhost:8080/`.
 
-### Invoice Desk (read-only UI)
+### Invoice Desk UI
 
 The **Invoice Desk** page is a small React app built into the Spring Boot jar. After `mvn spring-boot:run`, open:
 
 `http://localhost:8080/invoice-desk/`
 
-It lists invoices (optional `customer`, `status`, and `currency` filters), shows one invoice’s open balance with credits and payments, displays the aging report, and loads a customer statement for a date range and currency. All data comes from the existing read APIs; nothing on the page posts changes to the ledger.
+It lists invoices (optional `customer`, `status`, and `currency` filters), creates invoices, applies credits and payments, pays the remainder, voids, writes off, and assesses late fees through the existing invoice write APIs (each action reloads the open balance). It previews invoice and customer-statement PDFs inline, shows the aging report, and loads a customer statement for a date range and currency. Ledger posting rules are unchanged—only the APIs already exposed by the service are used.
 
 Rebuild the bundled assets after editing `frontend/` with `cd frontend && npm install && npm run build` (output lands in `src/main/resources/static/invoice-desk/`).
 
