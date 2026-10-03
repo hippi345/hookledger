@@ -2,7 +2,9 @@ package com.hookledger.api;
 
 import com.hookledger.domain.LedgerEvent;
 import com.hookledger.domain.MoneyEventType;
+import com.hookledger.service.LedgerAuditService;
 import com.hookledger.service.LedgerService;
+import java.util.List;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.time.Instant;
@@ -25,9 +27,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class EventController {
 
     private final LedgerService ledgerService;
+    private final LedgerAuditService ledgerAuditService;
 
-    public EventController(LedgerService ledgerService) {
+    public EventController(LedgerService ledgerService, LedgerAuditService ledgerAuditService) {
         this.ledgerService = ledgerService;
+        this.ledgerAuditService = ledgerAuditService;
     }
 
     @GetMapping
@@ -54,6 +58,14 @@ public class EventController {
                 .findEventByTimestamp(receivedAt)
                 .map(event -> ResponseEntity.ok(EventResponse.from(event)))
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/{eventId}/audit")
+    @Operation(summary = "List append-only audit rows for one ledger event id")
+    public List<AuditEntryResponse> audit(@PathVariable String eventId) {
+        return ledgerAuditService.listForEvent(eventId).stream()
+                .map(AuditEntryResponse::from)
+                .toList();
     }
 
     @GetMapping("/{eventId}")

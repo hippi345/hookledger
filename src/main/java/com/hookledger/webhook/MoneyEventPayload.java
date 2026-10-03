@@ -15,5 +15,6 @@ public record MoneyEventPayload(
         List<String> chargeIds,
         Long debitMinor,
         Long creditMinor,
-        Instant effectiveAt) {
+        Instant effectiveAt,
+        Long feeMinor) {
 }

@@ -1,5 +1,6 @@
 package com.hookledger.service;
 
+import com.hookledger.domain.LedgerAuditAction;
 import com.hookledger.domain.PeriodClose;
 import com.hookledger.repository.PeriodCloseRepository;
 import java.time.Instant;
@@ -12,9 +13,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class PeriodCloseService {
 
     private final PeriodCloseRepository repository;
+    private final LedgerAuditService ledgerAuditService;
 
-    public PeriodCloseService(PeriodCloseRepository repository) {
+    public PeriodCloseService(PeriodCloseRepository repository, LedgerAuditService ledgerAuditService) {
         this.repository = repository;
+        this.ledgerAuditService = ledgerAuditService;
     }
 
     @Transactional(readOnly = true)
@@ -36,7 +39,12 @@ public class PeriodCloseService {
             throw new InvalidMoneyEventException("Close date must not be before the existing lock");
         }
         row.setLockedThrough(normalized);
-        return repository.save(row).getLockedThrough();
+        Instant locked = repository.save(row).getLockedThrough();
+        ledgerAuditService.record(
+                LedgerAuditService.PERIOD_CLOSE_EVENT_ID,
+                LedgerAuditAction.period_close,
+                "lockedThrough=" + locked);
+        return locked;
     }
 
     @Transactional(readOnly = true)

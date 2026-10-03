@@ -79,6 +79,8 @@ curl -sS -X POST http://localhost:8080/api/webhooks \
 | `POST` | `/api/bank-lines/{id}/match-greedy` | **Greedy:** link the bank line to the oldest unmatched ledger entry with the same amount and currency |
 | `POST` | `/api/bank-lines/{id}/match-combination` | **Backtracking:** link the bank line to charges whose amounts sum to the line (charges stay in the ledger) |
 | `POST` | `/api/payouts/{id}/split` | **Dynamic programming:** split a payout into the fewest available charges that sum to its amount |
+| `GET` | `/api/events/{eventId}/audit` | Append-only audit rows for one event id |
+| `POST` | `/api/fx-conversions` | Convert between currencies at a stored rate (balanced legs) |
 
 ### Bank reconciliation
 
@@ -105,6 +107,22 @@ Balance for a currency is **charges minus refunds** (amounts in minor units). **
 ### Period close
 
 `POST /api/period-close?through=` sets an inclusive lock instant. Webhook ingest rejects events whose optional `effectiveAt` (or ingest time when omitted) is on or before that lock (HTTP 403). Reversing an event that falls inside a closed period is stamped at the first instant after the lock so nothing new is back-dated into the closed period.
+
+### Audit trail
+
+Append-only rows record **who** (`X-Hookledger-Actor` request header, default `system`), **when**, and **what** for webhook posts, reversals, bank-line matches, and period closes. There is no API to update or delete audit rows.
+
+`GET /api/events/{eventId}/audit` returns audit entries for that id (for example a charge id, `{id}_reversal`, a matched ledger event id, or `period-close` for close actions).
+
+### Processing fee on charges
+
+A charge webhook may include optional `feeMinor` (non-negative minor units in the same currency). The original charge is stored unchanged; when `feeMinor` is positive, a second event `{chargeId}_fee` is posted with type `fee` and its own balanced debit/credit legs.
+
+`POST /api/webhooks` with JSON such as `{"id":"c1","type":"charge","amount":1000,"currency":"usd","feeMinor":35}`.
+
+### FX conversion
+
+`POST /api/fx-conversions` accepts `id`, `sourceAmountMinor`, `sourceCurrency`, `targetCurrency`, and `rate` (decimal string). The service stores the rate and converted amount and posts two balanced `fx_conversion` legs (`{id}_fx_out` in the source currency and `{id}_fx_in` in the target currency).
 
 ### Trial balance
 

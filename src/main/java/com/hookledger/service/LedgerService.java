@@ -3,6 +3,7 @@ package com.hookledger.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hookledger.domain.EventStateFlags;
+import com.hookledger.domain.LedgerAuditAction;
 import com.hookledger.domain.LedgerEvent;
 import com.hookledger.domain.MoneyEventType;
 import com.hookledger.domain.ReplayIdempotency;
@@ -34,6 +35,7 @@ public class LedgerService {
     private final ObjectMapper objectMapper;
     private final SettlementGraphService settlementGraphService;
     private final PeriodCloseService periodCloseService;
+    private final LedgerAuditService ledgerAuditService;
     private final Deque<String> replayUndoStack = new ArrayDeque<>();
 
     public LedgerService(
@@ -41,12 +43,14 @@ public class LedgerService {
             ReplayIdempotencyRepository replayIdempotencyRepository,
             ObjectMapper objectMapper,
             SettlementGraphService settlementGraphService,
-            PeriodCloseService periodCloseService) {
+            PeriodCloseService periodCloseService,
+            LedgerAuditService ledgerAuditService) {
         this.repository = repository;
         this.replayIdempotencyRepository = replayIdempotencyRepository;
         this.objectMapper = objectMapper;
         this.settlementGraphService = settlementGraphService;
         this.periodCloseService = periodCloseService;
+        this.ledgerAuditService = ledgerAuditService;
     }
 
     @Transactional
@@ -85,6 +89,10 @@ public class LedgerService {
 
         try {
             repository.saveAndFlush(event);
+            ledgerAuditService.record(payload.id(), LedgerAuditAction.post, payload.type().name());
+            if (payload.type() == MoneyEventType.charge) {
+                createFeeIfPresent(payload, receivedAt);
+            }
             return new IngestResult(IngestStatus.CREATED, event);
         } catch (DataIntegrityViolationException ex) {
             return repository
@@ -281,8 +289,64 @@ public class LedgerService {
             original.markReversed();
             repository.save(original);
             repository.saveAndFlush(reversal);
+            ledgerAuditService.record(reversalId, LedgerAuditAction.reversal, "reverses=" + eventId);
             return reversal;
         });
+    }
+
+    private void createFeeIfPresent(MoneyEventPayload payload, Instant receivedAt) {
+        Long feeMinor = payload.feeMinor();
+        if (feeMinor == null || feeMinor <= 0) {
+            return;
+        }
+        String feeId = payload.id() + "_fee";
+        if (feeId.length() > 128 || !MoneyEventValidation.EVENT_ID.matcher(feeId).matches()) {
+            throw new InvalidMoneyEventException("Unable to derive fee event id for " + payload.id());
+        }
+        if (repository.existsById(feeId)) {
+            throw new InvalidMoneyEventException("Fee event already exists for charge " + payload.id());
+        }
+        DoubleEntryResolver.DoubleEntrySides sides = new DoubleEntryResolver.DoubleEntrySides(feeMinor, -feeMinor);
+        DoubleEntryResolver.validateBalanced(sides);
+        String rawPayload = buildFeePayload(feeId, payload.id(), feeMinor, payload.currency());
+        LedgerEvent feeEvent = new LedgerEvent(
+                feeId,
+                MoneyEventType.fee,
+                feeMinor,
+                sides.debitMinor(),
+                sides.creditMinor(),
+                payload.currency().toUpperCase(),
+                rawPayload,
+                receivedAt.truncatedTo(ChronoUnit.MICROS),
+                null,
+                List.of(),
+                null,
+                payload.id(),
+                null,
+                null,
+                null,
+                null);
+        repository.saveAndFlush(feeEvent);
+        ledgerAuditService.record(feeId, LedgerAuditAction.post, "feeFor=" + payload.id());
+    }
+
+    private String buildFeePayload(String feeId, String chargeId, long feeMinor, String currency) {
+        try {
+            return objectMapper.writeValueAsString(
+                    Map.of(
+                            "id",
+                            feeId,
+                            "type",
+                            MoneyEventType.fee.name(),
+                            "amount",
+                            feeMinor,
+                            "currency",
+                            currency.toLowerCase(),
+                            "chargeId",
+                            chargeId));
+        } catch (JsonProcessingException e) {
+            throw new InvalidMoneyEventException("Unable to serialize fee payload", e);
+        }
     }
 
     private String buildReversalPayload(String reversalId, LedgerEvent original) {
@@ -344,6 +408,14 @@ public class LedgerService {
                 if (!MoneyEventValidation.EVENT_ID.matcher(chargeId).matches()) {
                     throw new InvalidMoneyEventException("Payout chargeIds must be valid event ids");
                 }
+            }
+        }
+        if (payload.feeMinor() != null) {
+            if (payload.type() != MoneyEventType.charge) {
+                throw new InvalidMoneyEventException("feeMinor is only allowed on charge events");
+            }
+            if (payload.feeMinor() < 0) {
+                throw new InvalidMoneyEventException("feeMinor must be non-negative");
             }
         }
     }
