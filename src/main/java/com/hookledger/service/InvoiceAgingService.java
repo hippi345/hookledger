@@ -2,6 +2,7 @@ package com.hookledger.service;
 
 import com.hookledger.domain.Invoice;
 import com.hookledger.domain.InvoiceStatus;
+import com.hookledger.repository.InvoiceCreditNoteRepository;
 import com.hookledger.repository.InvoiceRepository;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
@@ -18,9 +19,12 @@ import org.springframework.transaction.annotation.Transactional;
 public class InvoiceAgingService {
 
     private final InvoiceRepository invoiceRepository;
+    private final InvoiceCreditNoteRepository invoiceCreditNoteRepository;
 
-    public InvoiceAgingService(InvoiceRepository invoiceRepository) {
+    public InvoiceAgingService(
+            InvoiceRepository invoiceRepository, InvoiceCreditNoteRepository invoiceCreditNoteRepository) {
         this.invoiceRepository = invoiceRepository;
+        this.invoiceCreditNoteRepository = invoiceCreditNoteRepository;
     }
 
     @Transactional(readOnly = true)
@@ -29,8 +33,12 @@ public class InvoiceAgingService {
 
         Map<String, MutableCurrencyAging> byCurrency = new TreeMap<>();
         for (Invoice invoice : openInvoices) {
+            long openAmountMinor =
+                    InvoiceOpenBalance.openAmountMinor(invoice, invoiceCreditNoteRepository);
+            if (openAmountMinor <= 0) {
+                continue;
+            }
             AgingBucket bucket = classifyBucket(invoice.getDueDate(), asOf);
-            long openAmountMinor = openAmountMinor(invoice);
             byCurrency
                     .computeIfAbsent(invoice.getCurrency(), MutableCurrencyAging::new)
                     .add(bucket, toLine(invoice, openAmountMinor));
@@ -58,10 +66,6 @@ public class InvoiceAgingService {
             return AgingBucket.DAYS_61_TO_90;
         }
         return AgingBucket.OVER_90;
-    }
-
-    private static long openAmountMinor(Invoice invoice) {
-        return invoice.getTotalAmountMinor();
     }
 
     private static InvoiceAgingLine toLine(Invoice invoice, long openAmountMinor) {

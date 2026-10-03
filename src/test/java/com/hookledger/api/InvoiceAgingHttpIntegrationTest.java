@@ -3,6 +3,7 @@ package com.hookledger.api;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.hookledger.AbstractPostgresIntegrationTest;
+import com.hookledger.repository.InvoiceCreditNoteRepository;
 import com.hookledger.repository.InvoiceRepository;
 import com.hookledger.repository.LedgerEventRepository;
 import com.hookledger.repository.PeriodCloseRepository;
@@ -35,6 +36,9 @@ class InvoiceAgingHttpIntegrationTest extends AbstractPostgresIntegrationTest {
     private InvoiceRepository invoiceRepository;
 
     @Autowired
+    private InvoiceCreditNoteRepository invoiceCreditNoteRepository;
+
+    @Autowired
     private ReplayIdempotencyRepository replayIdempotencyRepository;
 
     @Autowired
@@ -43,6 +47,7 @@ class InvoiceAgingHttpIntegrationTest extends AbstractPostgresIntegrationTest {
     @BeforeEach
     void cleanData() {
         replayIdempotencyRepository.deleteAll();
+        invoiceCreditNoteRepository.deleteAll();
         invoiceRepository.deleteAll();
         ledgerEventRepository.deleteAll();
         periodCloseRepository.deleteAll();

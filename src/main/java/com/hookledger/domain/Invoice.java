@@ -128,6 +128,12 @@ public class Invoice {
         this.ledgerEventId = ledgerEventId;
     }
 
+    public void markSettledWithoutLedger(Instant paidAt) {
+        this.status = InvoiceStatus.paid;
+        this.paidAt = paidAt;
+        this.ledgerEventId = null;
+    }
+
     public String ledgerChargeEventId() {
         return "inv_" + invoiceId.replace("-", "");
     }

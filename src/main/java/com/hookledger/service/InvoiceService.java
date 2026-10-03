@@ -3,11 +3,13 @@ package com.hookledger.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hookledger.domain.Invoice;
+import com.hookledger.domain.InvoiceCreditNote;
 import com.hookledger.domain.InvoiceLineItem;
 import com.hookledger.domain.InvoiceStatus;
 import com.hookledger.domain.LedgerAuditAction;
 import com.hookledger.domain.LedgerEvent;
 import com.hookledger.domain.MoneyEventType;
+import com.hookledger.repository.InvoiceCreditNoteRepository;
 import com.hookledger.repository.InvoiceRepository;
 import com.hookledger.repository.LedgerEventRepository;
 import java.time.Instant;
@@ -23,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class InvoiceService {
 
     private final InvoiceRepository invoiceRepository;
+    private final InvoiceCreditNoteRepository invoiceCreditNoteRepository;
     private final LedgerEventRepository ledgerEventRepository;
     private final ObjectMapper objectMapper;
     private final PeriodCloseService periodCloseService;
@@ -31,12 +34,14 @@ public class InvoiceService {
 
     public InvoiceService(
             InvoiceRepository invoiceRepository,
+            InvoiceCreditNoteRepository invoiceCreditNoteRepository,
             LedgerEventRepository ledgerEventRepository,
             ObjectMapper objectMapper,
             PeriodCloseService periodCloseService,
             LedgerAuditService ledgerAuditService,
             InvoicePdfService invoicePdfService) {
         this.invoiceRepository = invoiceRepository;
+        this.invoiceCreditNoteRepository = invoiceCreditNoteRepository;
         this.ledgerEventRepository = ledgerEventRepository;
         this.objectMapper = objectMapper;
         this.periodCloseService = periodCloseService;
@@ -90,10 +95,48 @@ public class InvoiceService {
     }
 
     @Transactional
+    public Optional<InvoiceCreditNote> applyCredit(String invoiceId, long amountMinor, String currency) {
+        return invoiceRepository.findByIdWithLineItems(invoiceId).map(invoice -> {
+            if (invoice.getStatus() == InvoiceStatus.paid) {
+                throw new InvoiceException("Invoice is already paid");
+            }
+            if (amountMinor <= 0) {
+                throw new InvoiceException("amountMinor must be positive");
+            }
+            if (currency == null || !MoneyEventValidation.CURRENCY.matcher(currency).matches()) {
+                throw new InvoiceException("Currency must be a 3-letter ISO code");
+            }
+            String normalizedCurrency = currency.toUpperCase();
+            if (!normalizedCurrency.equals(invoice.getCurrency())) {
+                throw new InvoiceException("Credit currency must match the invoice");
+            }
+
+            long openAmount = InvoiceOpenBalance.openAmountMinor(invoice, invoiceCreditNoteRepository);
+            if (amountMinor > openAmount) {
+                throw new InvoiceException("Credit amount exceeds remaining open balance");
+            }
+
+            Instant createdAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+            InvoiceCreditNote creditNote =
+                    new InvoiceCreditNote(invoice, amountMinor, normalizedCurrency, createdAt);
+            return invoiceCreditNoteRepository.saveAndFlush(creditNote);
+        });
+    }
+
+    @Transactional
     public Optional<Invoice> markPaid(String invoiceId) {
         return invoiceRepository.findByIdWithLineItems(invoiceId).map(invoice -> {
             if (invoice.getStatus() == InvoiceStatus.paid) {
                 throw new InvoiceException("Invoice is already paid");
+            }
+
+            long openAmount = InvoiceOpenBalance.openAmountMinor(invoice, invoiceCreditNoteRepository);
+            Instant receivedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+            periodCloseService.assertOpenFor(receivedAt);
+
+            if (openAmount == 0) {
+                invoice.markSettledWithoutLedger(receivedAt);
+                return invoiceRepository.save(invoice);
             }
 
             String eventId = invoice.ledgerChargeEventId();
@@ -104,18 +147,15 @@ public class InvoiceService {
                 throw new InvoiceException("Ledger event already exists for invoice");
             }
 
-            long amount = invoice.getTotalAmountMinor();
-            DoubleEntryResolver.DoubleEntrySides sides = new DoubleEntryResolver.DoubleEntrySides(amount, -amount);
+            DoubleEntryResolver.DoubleEntrySides sides =
+                    new DoubleEntryResolver.DoubleEntrySides(openAmount, -openAmount);
             DoubleEntryResolver.validateBalanced(sides);
 
-            Instant receivedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
-            periodCloseService.assertOpenFor(receivedAt);
-
-            String rawPayload = buildChargePayload(eventId, invoice);
+            String rawPayload = buildChargePayload(eventId, invoice, openAmount);
             LedgerEvent charge = new LedgerEvent(
                     eventId,
                     MoneyEventType.charge,
-                    amount,
+                    openAmount,
                     sides.debitMinor(),
                     sides.creditMinor(),
                     invoice.getCurrency(),
@@ -142,7 +182,7 @@ public class InvoiceService {
         return invoiceRepository.findByIdWithLineItems(invoiceId).map(invoicePdfService::render);
     }
 
-    private String buildChargePayload(String eventId, Invoice invoice) {
+    private String buildChargePayload(String eventId, Invoice invoice, long chargeAmountMinor) {
         try {
             return objectMapper.writeValueAsString(
                     Map.of(
@@ -151,7 +191,7 @@ public class InvoiceService {
                             "type",
                             MoneyEventType.charge.name(),
                             "amount",
-                            invoice.getTotalAmountMinor(),
+                            chargeAmountMinor,
                             "currency",
                             invoice.getCurrency().toLowerCase(),
                             "invoiceId",
