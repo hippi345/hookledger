@@ -28,8 +28,8 @@ public final class SampleInvoiceImageGenerator {
                 LocalDate.parse("2026-04-15"),
                 "USD",
                 createdAt);
-        invoice.addLineItem(new InvoiceLineItem(invoice, 0, "Widget subscription", 2500));
-        invoice.addLineItem(new InvoiceLineItem(invoice, 1, "Support hours", 750));
+        invoice.addLineItem(new InvoiceLineItem(invoice, 0, "Widget subscription", 2500, 0));
+        invoice.addLineItem(new InvoiceLineItem(invoice, 1, "Support hours", 750, 0));
 
         byte[] pdf = new InvoicePdfService().render(invoice);
         Path repoRoot = Path.of(System.getProperty("user.dir"));
