@@ -8,6 +8,7 @@ import com.hookledger.domain.InvoiceCreditNote;
 import com.hookledger.domain.InvoiceLineItem;
 import com.hookledger.domain.InvoicePayment;
 import com.hookledger.repository.InvoiceCreditNoteRepository;
+import com.hookledger.repository.InvoiceLateFeeRepository;
 import com.hookledger.repository.InvoicePaymentRepository;
 import com.hookledger.repository.InvoiceRepository;
 import com.hookledger.repository.LedgerEventRepository;
@@ -45,6 +46,9 @@ class CustomerStatementHttpIntegrationTest extends AbstractPostgresIntegrationTe
     private InvoicePaymentRepository invoicePaymentRepository;
 
     @Autowired
+    private InvoiceLateFeeRepository invoiceLateFeeRepository;
+
+    @Autowired
     private LedgerEventRepository ledgerEventRepository;
 
     @Autowired
@@ -56,6 +60,7 @@ class CustomerStatementHttpIntegrationTest extends AbstractPostgresIntegrationTe
     @BeforeEach
     void cleanData() {
         replayIdempotencyRepository.deleteAll();
+        invoiceLateFeeRepository.deleteAll();
         invoicePaymentRepository.deleteAll();
         invoiceCreditNoteRepository.deleteAll();
         invoiceRepository.deleteAll();
