@@ -1,9 +1,12 @@
 package com.hookledger.api;
 
+import com.hookledger.service.InvoiceAgingService;
 import com.hookledger.service.InvoiceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.time.LocalDate;
 import java.util.List;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -13,6 +16,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -21,9 +25,19 @@ import org.springframework.web.bind.annotation.RestController;
 public class InvoiceController {
 
     private final InvoiceService invoiceService;
+    private final InvoiceAgingService invoiceAgingService;
 
-    public InvoiceController(InvoiceService invoiceService) {
+    public InvoiceController(InvoiceService invoiceService, InvoiceAgingService invoiceAgingService) {
         this.invoiceService = invoiceService;
+        this.invoiceAgingService = invoiceAgingService;
+    }
+
+    @GetMapping("/aging")
+    @Operation(summary = "Accounts-receivable aging for unpaid invoices (does not post to the ledger)")
+    public InvoiceAgingResponse aging(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
+        LocalDate effectiveAsOf = asOf != null ? asOf : LocalDate.now();
+        return InvoiceAgingResponse.from(invoiceAgingService.buildReport(effectiveAsOf));
     }
 
     @PostMapping
