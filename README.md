@@ -71,6 +71,15 @@ curl -sS -X POST http://localhost:8080/api/webhooks \
 | `GET` | `/api/accounts/{account}/statement.csv` | Same statement as CSV |
 | `POST` | `/api/events/replay/undo` | Undo the most recent replay (404 if stack empty) |
 | `GET` | `/api/trial-balance` | Per-account debits and credits in minor units (optional `currency` filter); response includes totals and whether the books still balance to zero |
+| `POST` | `/api/bank-lines` | Record a bank statement line (`amountMinor`, `currency`, `date`); rows are kept after matching |
+| `GET` | `/api/bank-lines/unmatched` | Bank lines not yet linked to a ledger entry |
+| `POST` | `/api/bank-lines/{id}/match` | Link one bank line to one stored ledger event by id (`ledgerEventId` in JSON body) |
+
+### Bank reconciliation
+
+Bank lines are imported from statements separately from webhook ingest. `POST /api/bank-lines` stores `amountMinor`, a 3-letter ISO `currency`, and a calendar `date` (ISO-8601). Rows are never deleted when matched.
+
+`POST /api/bank-lines/{id}/match` links the bank line to exactly one existing ledger event. The ledger event’s **amount** (minor units) and **currency** must equal the bank line; otherwise the request is rejected with HTTP 400 and neither row is changed. After a successful match, the bank line stays in the database but no longer appears on `GET /api/bank-lines/unmatched`.
 
 ### Balance
 
