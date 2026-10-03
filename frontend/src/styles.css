@@ -151,3 +151,37 @@ th {
   color: #6b7280;
   margin-bottom: 0.15rem;
 }
+
+.success {
+  color: #027a48;
+  margin: 0.5rem 0;
+}
+
+button.action.secondary {
+  background: #fff;
+  color: #2f5bea;
+}
+
+button.action.danger {
+  background: #b42318;
+  border-color: #b42318;
+}
+
+.action-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.pdf-block {
+  margin-bottom: 1rem;
+}
+
+.pdf-embed {
+  width: 100%;
+  min-height: 420px;
+  border: 1px solid #dde3ec;
+  border-radius: 6px;
+  margin-top: 0.5rem;
+}

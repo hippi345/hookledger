@@ -2,22 +2,95 @@ import { useCallback, useEffect, useState } from 'react';
 
 const TABS = [
   { id: 'list', label: 'Invoices' },
+  { id: 'create', label: 'Create invoice' },
   { id: 'detail', label: 'Invoice detail' },
   { id: 'aging', label: 'Aging' },
   { id: 'statement', label: 'Customer statement' },
 ];
 
-async function fetchJson(path) {
-  const response = await fetch(path);
+async function fetchJson(path, init) {
+  const response = await fetch(path, init);
   if (!response.ok) {
     const text = await response.text();
     throw new Error(text || `Request failed (${response.status})`);
   }
-  return response.json();
+  if (response.status === 204) return null;
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    return response.json();
+  }
+  return null;
+}
+
+async function postJson(path, body) {
+  return fetchJson(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+async function postNoBody(path) {
+  return fetchJson(path, { method: 'POST' });
 }
 
 function formatMinor(amount, currency) {
   return `${amount} ${currency?.toUpperCase() ?? ''} (minor units)`;
+}
+
+function PdfPreview({ title, buildUrl, disabled }) {
+  const [blobUrl, setBlobUrl] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [blobUrl]);
+
+  const load = async () => {
+    const url = buildUrl();
+    if (!url) return;
+    setLoading(true);
+    setError('');
+    if (blobUrl) {
+      URL.revokeObjectURL(blobUrl);
+      setBlobUrl('');
+    }
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `PDF request failed (${response.status})`);
+      }
+      const blob = await response.blob();
+      if (!blob.type.includes('pdf') && blob.size < 5) {
+        throw new Error('Response was not a PDF');
+      }
+      setBlobUrl(URL.createObjectURL(blob));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="pdf-block">
+      <div className="form-row">
+        <button type="button" className="action secondary" onClick={load} disabled={disabled || loading}>
+          {loading ? 'Loading PDF…' : title}
+        </button>
+      </div>
+      {error && <p className="error">{error}</p>}
+      {blobUrl && (
+        <object className="pdf-embed" data={blobUrl} type="application/pdf" title={title}>
+          <p className="muted">PDF preview is not supported in this browser.</p>
+        </object>
+      )}
+    </div>
+  );
 }
 
 function InvoiceListPanel({ onSelectInvoice }) {
@@ -114,11 +187,114 @@ function InvoiceListPanel({ onSelectInvoice }) {
   );
 }
 
+function CreateInvoicePanel({ onCreated }) {
+  const [customerName, setCustomerName] = useState('Fable Harbor Supplies');
+  const [customerAddress, setCustomerAddress] = useState('12 Sample Wharf\nHarborview, HV 00001');
+  const [dueDate, setDueDate] = useState('2026-08-01');
+  const [currency, setCurrency] = useState('usd');
+  const [description, setDescription] = useState('Monthly service');
+  const [amountMinor, setAmountMinor] = useState('5000');
+  const [taxBps, setTaxBps] = useState('');
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const submit = async () => {
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const lineItem = {
+        description: description.trim(),
+        amountMinor: Number(amountMinor),
+        ...(taxBps.trim() ? { taxRateBasisPoints: Number(taxBps) } : {}),
+      };
+      const created = await postJson('/api/invoices', {
+        customerName: customerName.trim(),
+        customerAddress: customerAddress.trim() || null,
+        dueDate,
+        currency: currency.trim(),
+        lineItems: [lineItem],
+      });
+      const detail = await fetchJson(`/api/invoices/${encodeURIComponent(created.id)}`);
+      setSuccess(
+        `Created invoice ${created.id.slice(0, 8)}… — open balance ${formatMinor(detail.openBalanceMinor, created.currency)}`,
+      );
+      onCreated(created.id);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <p className="muted">Posts to POST /api/invoices (does not post to the ledger until payments or charges).</p>
+      <div className="filters">
+        <label>
+          Customer name
+          <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
+        </label>
+        <label>
+          Due date
+          <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+        </label>
+        <label>
+          Currency
+          <input value={currency} onChange={(e) => setCurrency(e.target.value)} />
+        </label>
+      </div>
+      <label>
+        Customer address (optional)
+        <textarea
+          rows={2}
+          value={customerAddress}
+          onChange={(e) => setCustomerAddress(e.target.value)}
+          style={{ width: '100%', font: 'inherit' }}
+        />
+      </label>
+      <h3>Line item</h3>
+      <div className="filters">
+        <label>
+          Description
+          <input value={description} onChange={(e) => setDescription(e.target.value)} />
+        </label>
+        <label>
+          Amount (minor)
+          <input value={amountMinor} onChange={(e) => setAmountMinor(e.target.value)} inputMode="numeric" />
+        </label>
+        <label>
+          Tax rate (basis points, optional)
+          <input value={taxBps} onChange={(e) => setTaxBps(e.target.value)} placeholder="e.g. 825" />
+        </label>
+        <button
+          type="button"
+          className="action"
+          onClick={submit}
+          disabled={loading || !customerName.trim() || !dueDate || !description.trim()}
+        >
+          Create invoice
+        </button>
+      </div>
+      {error && <p className="error">{error}</p>}
+      {success && <p className="success">{success}</p>}
+    </div>
+  );
+}
+
 function InvoiceDetailPanel({ invoiceId, setInvoiceId }) {
   const [id, setId] = useState(invoiceId || '');
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const [balanceNotice, setBalanceNotice] = useState('');
+  const [actionBusy, setActionBusy] = useState(false);
+  const [creditAmount, setCreditAmount] = useState('');
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [lateFeeMinor, setLateFeeMinor] = useState('');
+  const [lateFeeAsOf, setLateFeeAsOf] = useState('');
 
   useEffect(() => {
     if (invoiceId) setId(invoiceId);
@@ -144,6 +320,24 @@ function InvoiceDetailPanel({ invoiceId, setInvoiceId }) {
     if (invoiceId) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const reloadAfterAction = async (run) => {
+    setActionBusy(true);
+    setActionError('');
+    setBalanceNotice('');
+    try {
+      await run();
+      const json = await fetchJson(`/api/invoices/${encodeURIComponent(id.trim())}`);
+      setDetail(json);
+      setBalanceNotice(`Updated open balance: ${formatMinor(json.openBalanceMinor, json.invoice.currency)}`);
+    } catch (e) {
+      setActionError(e.message);
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const invoicePath = (suffix) => `/api/invoices/${encodeURIComponent(id.trim())}${suffix}`;
 
   return (
     <div>
@@ -177,6 +371,129 @@ function InvoiceDetailPanel({ invoiceId, setInvoiceId }) {
               {formatMinor(detail.invoice.totalAmountMinor, detail.invoice.currency)}
             </div>
           </div>
+          {balanceNotice && <p className="success">{balanceNotice}</p>}
+          {actionError && <p className="error">{actionError}</p>}
+
+          <h3>Actions</h3>
+          <div className="action-grid">
+            <div className="card">
+              <strong>Apply credit</strong>
+              <div className="form-row">
+                <label>
+                  Amount (minor)
+                  <input value={creditAmount} onChange={(e) => setCreditAmount(e.target.value)} />
+                </label>
+                <button
+                  type="button"
+                  className="action"
+                  disabled={actionBusy || !creditAmount}
+                  onClick={() =>
+                    reloadAfterAction(() =>
+                      postJson(invoicePath('/credits'), {
+                        amountMinor: Number(creditAmount),
+                        currency: detail.invoice.currency,
+                      }),
+                    )
+                  }
+                >
+                  POST …/credits
+                </button>
+              </div>
+            </div>
+            <div className="card">
+              <strong>Record payment</strong>
+              <div className="form-row">
+                <label>
+                  Amount (minor)
+                  <input value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
+                </label>
+                <button
+                  type="button"
+                  className="action"
+                  disabled={actionBusy || !paymentAmount}
+                  onClick={() =>
+                    reloadAfterAction(() =>
+                      postJson(invoicePath('/payments'), {
+                        amountMinor: Number(paymentAmount),
+                        currency: detail.invoice.currency,
+                      }),
+                    )
+                  }
+                >
+                  POST …/payments
+                </button>
+              </div>
+            </div>
+            <div className="card">
+              <strong>Pay remainder</strong>
+              <button
+                type="button"
+                className="action"
+                disabled={actionBusy}
+                onClick={() => reloadAfterAction(() => postNoBody(invoicePath('/pay')))}
+              >
+                POST …/pay
+              </button>
+            </div>
+            <div className="card">
+              <strong>Void invoice</strong>
+              <button
+                type="button"
+                className="action danger"
+                disabled={actionBusy}
+                onClick={() => reloadAfterAction(() => postNoBody(invoicePath('/void')))}
+              >
+                POST …/void
+              </button>
+            </div>
+            <div className="card">
+              <strong>Write off balance</strong>
+              <button
+                type="button"
+                className="action danger"
+                disabled={actionBusy}
+                onClick={() => reloadAfterAction(() => postNoBody(invoicePath('/write-off')))}
+              >
+                POST …/write-off
+              </button>
+            </div>
+            <div className="card">
+              <strong>Late fee</strong>
+              <div className="form-row">
+                <label>
+                  Fee (minor)
+                  <input value={lateFeeMinor} onChange={(e) => setLateFeeMinor(e.target.value)} />
+                </label>
+                <label>
+                  As of (optional)
+                  <input type="date" value={lateFeeAsOf} onChange={(e) => setLateFeeAsOf(e.target.value)} />
+                </label>
+                <button
+                  type="button"
+                  className="action"
+                  disabled={actionBusy || !lateFeeMinor}
+                  onClick={() =>
+                    reloadAfterAction(() =>
+                      postJson(invoicePath('/late-fee'), {
+                        feeMinor: Number(lateFeeMinor),
+                        asOf: lateFeeAsOf || null,
+                      }),
+                    )
+                  }
+                >
+                  POST …/late-fee
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <h3>Invoice PDF</h3>
+          <PdfPreview
+            title="Preview invoice PDF"
+            disabled={!id.trim()}
+            buildUrl={() => invoicePath('/pdf')}
+          />
+
           <h3>Credits</h3>
           {detail.credits.length === 0 ? (
             <p className="muted">No credits applied.</p>
@@ -313,10 +630,10 @@ function AgingPanel() {
 }
 
 function StatementPanel() {
-  const [customer, setCustomer] = useState('');
+  const [customer, setCustomer] = useState('Fable Harbor Supplies');
   const [currency, setCurrency] = useState('usd');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  const [from, setFrom] = useState('2026-01-01');
+  const [to, setTo] = useState('2026-12-31');
   const [statement, setStatement] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -334,6 +651,11 @@ function StatementPanel() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const statementPdfUrl = () => {
+    if (!customer.trim() || !currency.trim() || !from || !to) return null;
+    return `/api/customers/${encodeURIComponent(customer.trim())}/statement.pdf?currency=${encodeURIComponent(currency.trim())}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
   };
 
   return (
@@ -360,6 +682,8 @@ function StatementPanel() {
         </button>
       </div>
       {error && <p className="error">{error}</p>}
+      <h3>Statement PDF</h3>
+      <PdfPreview title="Preview statement PDF" buildUrl={statementPdfUrl} disabled={!statementPdfUrl()} />
       {statement && (
         <>
           <div className="grid-two">
@@ -409,11 +733,19 @@ export default function App() {
     setTab('detail');
   };
 
+  const onCreated = (id) => {
+    setSelectedInvoiceId(id);
+    setTab('detail');
+  };
+
   return (
     <div className="app" data-hookledger-page="invoice-desk">
       <header>
         <h1>Invoice Desk</h1>
-        <p>Read-only view of invoices, aging, and customer statements (amounts in minor units).</p>
+        <p>
+          Browse invoices, run write actions against the existing invoice APIs, preview PDFs, and view aging and
+          customer statements (amounts in minor units).
+        </p>
       </header>
       <nav className="tabs" aria-label="Sections">
         {TABS.map((t) => (
@@ -429,6 +761,7 @@ export default function App() {
       </nav>
       <section className="panel">
         {tab === 'list' && <InvoiceListPanel onSelectInvoice={onSelectInvoice} />}
+        {tab === 'create' && <CreateInvoicePanel onCreated={onCreated} />}
         {tab === 'detail' && (
           <InvoiceDetailPanel invoiceId={selectedInvoiceId} setInvoiceId={setSelectedInvoiceId} />
         )}
