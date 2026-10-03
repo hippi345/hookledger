@@ -352,6 +352,17 @@ public class InvoiceService {
     }
 
     @Transactional(readOnly = true)
+    public Optional<InvoiceDetail> getInvoiceDetail(String invoiceId) {
+        return invoiceRepository
+                .findByIdWithLineItems(invoiceId)
+                .map(invoice -> new InvoiceDetail(
+                        invoice,
+                        openAmountMinor(invoice),
+                        invoiceCreditNoteRepository.findByInvoiceInvoiceIdOrderByCreatedAtAsc(invoiceId),
+                        invoicePaymentRepository.findByInvoiceInvoiceIdOrderByCreatedAtAsc(invoiceId)));
+    }
+
+    @Transactional(readOnly = true)
     public Optional<byte[]> renderPdf(String invoiceId) {
         return invoiceRepository.findByIdWithLineItems(invoiceId).map(invoicePdfService::render);
     }
@@ -447,4 +458,7 @@ public class InvoiceService {
     public record PaymentRefundResult(InvoicePayment payment, String reversalLedgerEventId) {}
 
     public record InvoiceListPage(List<InvoiceResponse> invoices, int limit, int offset, long total) {}
+
+    public record InvoiceDetail(
+            Invoice invoice, long openBalanceMinor, List<InvoiceCreditNote> credits, List<InvoicePayment> payments) {}
 }

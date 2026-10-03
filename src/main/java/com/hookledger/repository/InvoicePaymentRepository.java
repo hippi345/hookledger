@@ -19,6 +19,8 @@ public interface InvoicePaymentRepository extends JpaRepository<InvoicePayment, 
 
     long countByInvoiceInvoiceId(String invoiceId);
 
+    List<InvoicePayment> findByInvoiceInvoiceIdOrderByCreatedAtAsc(String invoiceId);
+
     @Query(
             """
             SELECT p FROM InvoicePayment p JOIN p.invoice i
