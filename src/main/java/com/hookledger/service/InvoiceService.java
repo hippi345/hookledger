@@ -5,11 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hookledger.domain.Invoice;
 import com.hookledger.domain.InvoiceCreditNote;
 import com.hookledger.domain.InvoiceLineItem;
+import com.hookledger.domain.InvoicePayment;
 import com.hookledger.domain.InvoiceStatus;
 import com.hookledger.domain.LedgerAuditAction;
 import com.hookledger.domain.LedgerEvent;
 import com.hookledger.domain.MoneyEventType;
 import com.hookledger.repository.InvoiceCreditNoteRepository;
+import com.hookledger.repository.InvoicePaymentRepository;
 import com.hookledger.repository.InvoiceRepository;
 import com.hookledger.repository.LedgerEventRepository;
 import java.time.Instant;
@@ -26,6 +28,7 @@ public class InvoiceService {
 
     private final InvoiceRepository invoiceRepository;
     private final InvoiceCreditNoteRepository invoiceCreditNoteRepository;
+    private final InvoicePaymentRepository invoicePaymentRepository;
     private final LedgerEventRepository ledgerEventRepository;
     private final ObjectMapper objectMapper;
     private final PeriodCloseService periodCloseService;
@@ -35,6 +38,7 @@ public class InvoiceService {
     public InvoiceService(
             InvoiceRepository invoiceRepository,
             InvoiceCreditNoteRepository invoiceCreditNoteRepository,
+            InvoicePaymentRepository invoicePaymentRepository,
             LedgerEventRepository ledgerEventRepository,
             ObjectMapper objectMapper,
             PeriodCloseService periodCloseService,
@@ -42,6 +46,7 @@ public class InvoiceService {
             InvoicePdfService invoicePdfService) {
         this.invoiceRepository = invoiceRepository;
         this.invoiceCreditNoteRepository = invoiceCreditNoteRepository;
+        this.invoicePaymentRepository = invoicePaymentRepository;
         this.ledgerEventRepository = ledgerEventRepository;
         this.objectMapper = objectMapper;
         this.periodCloseService = periodCloseService;
@@ -111,7 +116,7 @@ public class InvoiceService {
                 throw new InvoiceException("Credit currency must match the invoice");
             }
 
-            long openAmount = InvoiceOpenBalance.openAmountMinor(invoice, invoiceCreditNoteRepository);
+            long openAmount = openAmountMinor(invoice);
             if (amountMinor > openAmount) {
                 throw new InvoiceException("Credit amount exceeds remaining open balance");
             }
@@ -124,13 +129,52 @@ public class InvoiceService {
     }
 
     @Transactional
+    public Optional<InvoicePayment> applyPayment(String invoiceId, long amountMinor, String currency) {
+        return invoiceRepository.findByIdWithLineItems(invoiceId).map(invoice -> {
+            if (invoice.getStatus() == InvoiceStatus.paid) {
+                throw new InvoiceException("Invoice is already paid");
+            }
+            if (amountMinor <= 0) {
+                throw new InvoiceException("amountMinor must be positive");
+            }
+            if (currency == null || !MoneyEventValidation.CURRENCY.matcher(currency).matches()) {
+                throw new InvoiceException("Currency must be a 3-letter ISO code");
+            }
+            String normalizedCurrency = currency.toUpperCase();
+            if (!normalizedCurrency.equals(invoice.getCurrency())) {
+                throw new InvoiceException("Payment currency must match the invoice");
+            }
+
+            long openAmount = openAmountMinor(invoice);
+            if (amountMinor > openAmount) {
+                throw new InvoiceException("Payment amount exceeds remaining open balance");
+            }
+
+            Instant receivedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+            periodCloseService.assertOpenFor(receivedAt);
+
+            InvoicePayment payment = new InvoicePayment(invoice, amountMinor, normalizedCurrency, receivedAt);
+            postInvoiceCharge(invoice, amountMinor, payment.getLedgerEventId(), receivedAt);
+
+            InvoicePayment saved = invoicePaymentRepository.saveAndFlush(payment);
+
+            if (amountMinor == openAmount) {
+                invoice.markPaid(receivedAt, payment.getLedgerEventId());
+                invoiceRepository.save(invoice);
+            }
+
+            return saved;
+        });
+    }
+
+    @Transactional
     public Optional<Invoice> markPaid(String invoiceId) {
         return invoiceRepository.findByIdWithLineItems(invoiceId).map(invoice -> {
             if (invoice.getStatus() == InvoiceStatus.paid) {
                 throw new InvoiceException("Invoice is already paid");
             }
 
-            long openAmount = InvoiceOpenBalance.openAmountMinor(invoice, invoiceCreditNoteRepository);
+            long openAmount = openAmountMinor(invoice);
             Instant receivedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
             periodCloseService.assertOpenFor(receivedAt);
 
@@ -140,32 +184,7 @@ public class InvoiceService {
             }
 
             String eventId = invoice.ledgerChargeEventId();
-            if (!MoneyEventValidation.EVENT_ID.matcher(eventId).matches()) {
-                throw new InvoiceException("Unable to derive ledger event id for invoice");
-            }
-            if (ledgerEventRepository.existsById(eventId)) {
-                throw new InvoiceException("Ledger event already exists for invoice");
-            }
-
-            DoubleEntryResolver.DoubleEntrySides sides =
-                    new DoubleEntryResolver.DoubleEntrySides(openAmount, -openAmount);
-            DoubleEntryResolver.validateBalanced(sides);
-
-            String rawPayload = buildChargePayload(eventId, invoice, openAmount);
-            LedgerEvent charge = new LedgerEvent(
-                    eventId,
-                    MoneyEventType.charge,
-                    openAmount,
-                    sides.debitMinor(),
-                    sides.creditMinor(),
-                    invoice.getCurrency(),
-                    rawPayload,
-                    receivedAt,
-                    null,
-                    List.of());
-
-            ledgerEventRepository.saveAndFlush(charge);
-            ledgerAuditService.record(eventId, LedgerAuditAction.post, "invoiceId=" + invoice.getInvoiceId());
+            postInvoiceCharge(invoice, openAmount, eventId, receivedAt);
 
             invoice.markPaid(receivedAt, eventId);
             return invoiceRepository.save(invoice);
@@ -180,6 +199,40 @@ public class InvoiceService {
     @Transactional(readOnly = true)
     public Optional<byte[]> renderPdf(String invoiceId) {
         return invoiceRepository.findByIdWithLineItems(invoiceId).map(invoicePdfService::render);
+    }
+
+    private long openAmountMinor(Invoice invoice) {
+        return InvoiceOpenBalance.openAmountMinor(
+                invoice, invoiceCreditNoteRepository, invoicePaymentRepository);
+    }
+
+    private void postInvoiceCharge(Invoice invoice, long chargeAmountMinor, String eventId, Instant receivedAt) {
+        if (!MoneyEventValidation.EVENT_ID.matcher(eventId).matches()) {
+            throw new InvoiceException("Unable to derive ledger event id for invoice");
+        }
+        if (ledgerEventRepository.existsById(eventId)) {
+            throw new InvoiceException("Ledger event already exists for invoice");
+        }
+
+        DoubleEntryResolver.DoubleEntrySides sides =
+                new DoubleEntryResolver.DoubleEntrySides(chargeAmountMinor, -chargeAmountMinor);
+        DoubleEntryResolver.validateBalanced(sides);
+
+        String rawPayload = buildChargePayload(eventId, invoice, chargeAmountMinor);
+        LedgerEvent charge = new LedgerEvent(
+                eventId,
+                MoneyEventType.charge,
+                chargeAmountMinor,
+                sides.debitMinor(),
+                sides.creditMinor(),
+                invoice.getCurrency(),
+                rawPayload,
+                receivedAt,
+                null,
+                List.of());
+
+        ledgerEventRepository.saveAndFlush(charge);
+        ledgerAuditService.record(eventId, LedgerAuditAction.post, "invoiceId=" + invoice.getInvoiceId());
     }
 
     private String buildChargePayload(String eventId, Invoice invoice, long chargeAmountMinor) {
