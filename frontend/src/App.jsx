@@ -4,6 +4,9 @@ const TABS = [
   { id: 'list', label: 'Invoices' },
   { id: 'create', label: 'Create invoice' },
   { id: 'detail', label: 'Invoice detail' },
+  { id: 'overdue', label: 'Overdue' },
+  { id: 'schedule', label: 'Schedule generate' },
+  { id: 'customer-pay', label: 'Customer payment' },
   { id: 'aging', label: 'Aging' },
   { id: 'statement', label: 'Customer statement' },
 ];
@@ -528,6 +531,7 @@ function InvoiceDetailPanel({ invoiceId, setInvoiceId }) {
                   <th>Amount (minor)</th>
                   <th>Ledger event</th>
                   <th>Created</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
@@ -537,6 +541,251 @@ function InvoiceDetailPanel({ invoiceId, setInvoiceId }) {
                     <td>{p.amountMinor}</td>
                     <td>{p.ledgerEventId}</td>
                     <td>{p.createdAt}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="action secondary"
+                        disabled={actionBusy}
+                        onClick={() =>
+                          reloadAfterAction(() =>
+                            postNoBody(invoicePath(`/payments/${encodeURIComponent(p.id)}/refund`)),
+                          )
+                        }
+                      >
+                        Refund
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <p className="muted">Refund calls POST /api/invoices/&#123;id&#125;/payments/&#123;paymentId&#125;/refund, then reloads open balance.</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function OverduePanel({ onSelectInvoice }) {
+  const [asOf, setAsOf] = useState('');
+  const [report, setReport] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const params = asOf ? `?asOf=${encodeURIComponent(asOf)}` : '';
+      setReport(await fetchJson(`/api/invoices/overdue${params}`));
+    } catch (e) {
+      setError(e.message);
+      setReport(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  return (
+    <div>
+      <p className="muted">GET /api/invoices/overdue — unpaid invoices past due, grouped by customer.</p>
+      <div className="form-row">
+        <label>
+          As of (optional)
+          <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
+        </label>
+        <button type="button" className="action" onClick={load} disabled={loading}>
+          Refresh
+        </button>
+      </div>
+      {error && <p className="error">{error}</p>}
+      {report && (
+        <>
+          <p className="muted">As of {report.asOf}</p>
+          {report.customers.length === 0 ? (
+            <p className="muted">No overdue invoices.</p>
+          ) : (
+            report.customers.map((group) => (
+              <div key={group.customer} className="card" style={{ marginBottom: '1rem' }}>
+                <h3>{group.customer}</h3>
+                {group.totalsByCurrency.map((t) => (
+                  <p className="muted" key={t.currency}>
+                    Total {t.currency.toUpperCase()}: {t.totalAmountMinor} (minor)
+                  </p>
+                ))}
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Invoice</th>
+                      <th>Due</th>
+                      <th>Currency</th>
+                      <th>Open (minor)</th>
+                      <th>Days past due</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {group.invoices.map((line) => (
+                      <tr key={line.id}>
+                        <td>
+                          <span
+                            className="linkish"
+                            onClick={() => onSelectInvoice(line.id)}
+                            role="button"
+                            tabIndex={0}
+                          >
+                            {line.id.slice(0, 8)}…
+                          </span>
+                        </td>
+                        <td>{line.dueDate}</td>
+                        <td>{line.currency}</td>
+                        <td>{line.openAmountMinor}</td>
+                        <td>{line.daysPastDue}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ScheduleGeneratePanel({ onGenerated }) {
+  const [scheduleId, setScheduleId] = useState('');
+  const [generated, setGenerated] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const generate = async () => {
+    if (!scheduleId.trim()) return;
+    setLoading(true);
+    setError('');
+    setGenerated(null);
+    try {
+      const invoice = await postNoBody(
+        `/api/invoice-schedules/${encodeURIComponent(scheduleId.trim())}/generate`,
+      );
+      setGenerated(invoice);
+      onGenerated(invoice.id);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <p className="muted">
+        POST /api/invoice-schedules/&#123;id&#125;/generate — creates the next invoice from an existing schedule (create
+        schedules via POST /api/invoice-schedules outside this page if needed).
+      </p>
+      <div className="form-row">
+        <label>
+          Schedule ID
+          <input value={scheduleId} onChange={(e) => setScheduleId(e.target.value)} placeholder="Paste schedule id" />
+        </label>
+        <button type="button" className="action" onClick={generate} disabled={loading || !scheduleId.trim()}>
+          Generate next invoice
+        </button>
+      </div>
+      {error && <p className="error">{error}</p>}
+      {generated && (
+        <div className="card">
+          <strong>Generated invoice</strong>
+          <p>ID: {generated.id}</p>
+          <p>Customer: {generated.customerName}</p>
+          <p>Due: {generated.dueDate}</p>
+          <p>Status: {generated.status}</p>
+          <p>Total: {formatMinor(generated.totalAmountMinor, generated.currency)}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CustomerPaymentPanel() {
+  const [customer, setCustomer] = useState('Fable Harbor Supplies');
+  const [currency, setCurrency] = useState('usd');
+  const [amountMinor, setAmountMinor] = useState('');
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const submit = async () => {
+    if (!customer.trim() || !currency.trim() || !amountMinor) return;
+    setLoading(true);
+    setError('');
+    setResult(null);
+    try {
+      const path = `/api/customers/${encodeURIComponent(customer.trim())}/payments`;
+      const json = await postJson(path, {
+        amountMinor: Number(amountMinor),
+        currency: currency.trim(),
+      });
+      setResult(json);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <p className="muted">
+        POST /api/customers/&#123;customer&#125;/payments — allocates across open invoices oldest-due first (greedy).
+      </p>
+      <div className="filters">
+        <label>
+          Customer
+          <input value={customer} onChange={(e) => setCustomer(e.target.value)} />
+        </label>
+        <label>
+          Currency
+          <input value={currency} onChange={(e) => setCurrency(e.target.value)} />
+        </label>
+        <label>
+          Amount (minor)
+          <input value={amountMinor} onChange={(e) => setAmountMinor(e.target.value)} inputMode="numeric" />
+        </label>
+        <button type="button" className="action" onClick={submit} disabled={loading || !amountMinor}>
+          Apply payment
+        </button>
+      </div>
+      {error && <p className="error">{error}</p>}
+      {result && (
+        <>
+          <p className="success">
+            Applied {result.appliedAmountMinor} {result.currency?.toUpperCase()} (minor) for {result.customer}
+          </p>
+          {result.payments.length === 0 ? (
+            <p className="muted">No invoices received a slice.</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Invoice</th>
+                  <th>Payment id</th>
+                  <th>Amount (minor)</th>
+                  <th>Ledger event</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.payments.map((p) => (
+                  <tr key={p.id}>
+                    <td>{p.invoiceId.slice(0, 8)}…</td>
+                    <td>{p.id}</td>
+                    <td>{p.amountMinor}</td>
+                    <td>{p.ledgerEventId}</td>
                   </tr>
                 ))}
               </tbody>
@@ -743,7 +992,8 @@ export default function App() {
       <header>
         <h1>Invoice Desk</h1>
         <p>
-          Browse invoices, run write actions against the existing invoice APIs, preview PDFs, and view aging and
+          Browse invoices, run write actions against the existing invoice APIs (including payment refunds, schedule
+          generation, and customer-level payment allocation), preview PDFs, view overdue and aging reports, and load
           customer statements (amounts in minor units).
         </p>
       </header>
@@ -765,6 +1015,9 @@ export default function App() {
         {tab === 'detail' && (
           <InvoiceDetailPanel invoiceId={selectedInvoiceId} setInvoiceId={setSelectedInvoiceId} />
         )}
+        {tab === 'overdue' && <OverduePanel onSelectInvoice={onSelectInvoice} />}
+        {tab === 'schedule' && <ScheduleGeneratePanel onGenerated={onCreated} />}
+        {tab === 'customer-pay' && <CustomerPaymentPanel />}
         {tab === 'aging' && <AgingPanel />}
         {tab === 'statement' && <StatementPanel />}
       </section>

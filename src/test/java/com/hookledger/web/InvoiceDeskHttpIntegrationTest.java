@@ -3,9 +3,18 @@ package com.hookledger.web;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.hookledger.AbstractPostgresIntegrationTest;
+import com.hookledger.api.CreateCustomerPaymentRequest;
+import com.hookledger.api.CreateInvoicePaymentRequest;
 import com.hookledger.api.CreateInvoiceRequest;
+import com.hookledger.api.CreateInvoiceScheduleRequest;
+import com.hookledger.api.CustomerPaymentResponse;
 import com.hookledger.api.InvoiceLineItemRequest;
+import com.hookledger.api.InvoiceOverdueResponse;
+import com.hookledger.api.InvoicePaymentRefundResponse;
+import com.hookledger.api.InvoicePaymentResponse;
 import com.hookledger.api.InvoiceResponse;
+import com.hookledger.api.InvoiceScheduleResponse;
+import com.hookledger.domain.InvoiceScheduleInterval;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -67,8 +76,96 @@ class InvoiceDeskHttpIntegrationTest extends AbstractPostgresIntegrationTest {
         assertThat(js).contains("/void");
         assertThat(js).contains("/write-off");
         assertThat(js).contains("/late-fee");
+        assertThat(js).contains("/refund");
+        assertThat(js).contains("/api/invoices/overdue");
+        assertThat(js).contains("/api/invoice-schedules/");
+        assertThat(js).contains("/generate");
+        assertThat(js).contains("/api/customers/");
         assertThat(js).contains("/pdf");
         assertThat(js).contains("statement.pdf");
+    }
+
+    @Test
+    void invoiceDeskExtendedWriteFlowsMatchApiUsedByPage() {
+        LocalDate overdueDue = LocalDate.parse("2026-03-01");
+        LocalDate asOf = LocalDate.parse("2026-06-15");
+        CreateInvoiceRequest overdueRequest = new CreateInvoiceRequest(
+                "Desk Overdue Fable Co",
+                null,
+                overdueDue,
+                "usd",
+                List.of(new InvoiceLineItemRequest("Overdue line", 4000, null)));
+        ResponseEntity<InvoiceResponse> overdueInvoice =
+                restTemplate.postForEntity("/api/invoices", overdueRequest, InvoiceResponse.class);
+        assertThat(overdueInvoice.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        ResponseEntity<InvoiceOverdueResponse> overdueList = restTemplate.getForEntity(
+                "/api/invoices/overdue?asOf=" + asOf, InvoiceOverdueResponse.class);
+        assertThat(overdueList.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(overdueList.getBody()).isNotNull();
+        assertThat(overdueList.getBody().customers()).isNotEmpty();
+
+        CreateInvoiceScheduleRequest scheduleRequest = new CreateInvoiceScheduleRequest(
+                "Desk Schedule Fable Co",
+                null,
+                "usd",
+                InvoiceScheduleInterval.monthly,
+                List.of(new InvoiceLineItemRequest("Subscription", 2500, null)));
+        ResponseEntity<InvoiceScheduleResponse> scheduleCreated = restTemplate.postForEntity(
+                "/api/invoice-schedules", scheduleRequest, InvoiceScheduleResponse.class);
+        assertThat(scheduleCreated.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        String scheduleId = scheduleCreated.getBody().id();
+
+        ResponseEntity<InvoiceResponse> generated = restTemplate.postForEntity(
+                "/api/invoice-schedules/" + scheduleId + "/generate", null, InvoiceResponse.class);
+        assertThat(generated.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(generated.getBody()).isNotNull();
+
+        CreateInvoiceRequest payRequest = new CreateInvoiceRequest(
+                "Desk Allocate Fable Co",
+                null,
+                LocalDate.parse("2026-04-01"),
+                "usd",
+                List.of(new InvoiceLineItemRequest("Allocate line", 2000, null)));
+        ResponseEntity<InvoiceResponse> allocateInvoice =
+                restTemplate.postForEntity("/api/invoices", payRequest, InvoiceResponse.class);
+        assertThat(allocateInvoice.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        ResponseEntity<CustomerPaymentResponse> customerPayment = restTemplate.postForEntity(
+                "/api/customers/Desk Allocate Fable Co/payments",
+                new CreateCustomerPaymentRequest(1500, "usd"),
+                CustomerPaymentResponse.class);
+        assertThat(customerPayment.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(customerPayment.getBody()).isNotNull();
+        assertThat(customerPayment.getBody().appliedAmountMinor()).isEqualTo(1500);
+
+        CreateInvoiceRequest refundRequest = new CreateInvoiceRequest(
+                "Desk Refund Fable Co",
+                null,
+                LocalDate.parse("2026-05-01"),
+                "usd",
+                List.of(new InvoiceLineItemRequest("Refund line", 5000, null)));
+        ResponseEntity<InvoiceResponse> refundInvoice =
+                restTemplate.postForEntity("/api/invoices", refundRequest, InvoiceResponse.class);
+        assertThat(refundInvoice.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        String refundInvoiceId = refundInvoice.getBody().id();
+
+        ResponseEntity<InvoicePaymentResponse> payment = restTemplate.postForEntity(
+                "/api/invoices/" + refundInvoiceId + "/payments",
+                new CreateInvoicePaymentRequest(2000, "usd"),
+                InvoicePaymentResponse.class);
+        assertThat(payment.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        ResponseEntity<InvoicePaymentRefundResponse> refunded = restTemplate.postForEntity(
+                "/api/invoices/" + refundInvoiceId + "/payments/" + payment.getBody().id() + "/refund",
+                null,
+                InvoicePaymentRefundResponse.class);
+        assertThat(refunded.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        ResponseEntity<String> detail =
+                restTemplate.getForEntity("/api/invoices/" + refundInvoiceId, String.class);
+        assertThat(detail.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(detail.getBody()).contains("\"openBalanceMinor\":5000");
     }
 
     @Test

@@ -37,7 +37,7 @@ The **Invoice Desk** page is a small React app built into the Spring Boot jar. A
 
 `http://localhost:8080/invoice-desk/`
 
-It lists invoices (optional `customer`, `status`, and `currency` filters), creates invoices, applies credits and payments, pays the remainder, voids, writes off, and assesses late fees through the existing invoice write APIs (each action reloads the open balance). It previews invoice and customer-statement PDFs inline, shows the aging report, and loads a customer statement for a date range and currency. Ledger posting rules are unchanged—only the APIs already exposed by the service are used.
+It lists invoices (optional `customer`, `status`, and `currency` filters), creates invoices, applies credits and payments, refunds posted payments, pays the remainder, voids, writes off, and assesses late fees through the existing invoice write APIs (each action reloads the open balance). It shows overdue invoices grouped by customer, generates the next invoice from an existing schedule id, and allocates a customer payment oldest-due first across open invoices. It previews invoice and customer-statement PDFs inline, shows the aging report, and loads a customer statement for a date range and currency. Ledger posting rules are unchanged—only the APIs already exposed by the service are used.
 
 Rebuild the bundled assets after editing `frontend/` with `cd frontend && npm install && npm run build` (output lands in `src/main/resources/static/invoice-desk/`).
 
