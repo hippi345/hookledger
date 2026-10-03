@@ -84,10 +84,13 @@ curl -sS -X POST http://localhost:8080/api/webhooks \
 | `POST` | `/api/invoices` | Create an invoice with customer, due date, and line items (not posted to the ledger) |
 | `POST` | `/api/invoices/{id}/pay` | Mark an invoice paid and post a balanced `charge` to the ledger |
 | `GET` | `/api/invoices/{id}/pdf` | Download the invoice as a PDF (`application/pdf`) |
+| `GET` | `/api/invoices/aging` | Unpaid invoice aging by days past due (optional `asOf` date, default today); does not post to the ledger |
 
 ### Invoices
 
 Invoices are stored separately from ledger events. `POST /api/invoices` accepts `customerName`, optional `customerAddress`, `dueDate` (ISO-8601 date), `currency`, and `lineItems` (`description`, `amountMinor`). Amounts use minor units in the given currency; line items must sum to a positive total. Nothing is posted to the ledger until `POST /api/invoices/{id}/pay`, which creates a balanced charge (`debitMinor` positive, `creditMinor` negative, sum zero) linked to the invoice. Invoice rows are never deleted.
+
+`GET /api/invoices/aging` returns unpaid invoices grouped by currency into aging buckets (`current`, `30`, `60`, `90`, `over90`) using **linear classification** by calendar days past due relative to optional `asOf` (ISO-8601 date, default the server’s current date). Each line shows invoice id, customer, due date, currency, and open amount in minor units (today the full unpaid total; pay is all-or-nothing). Responses include per-bucket totals and a grand total per currency.
 
 Sample generated PDF (fictional customer):
 
@@ -157,6 +160,7 @@ A charge webhook may include optional `feeMinor` (non-negative minor units in th
 | **Backtracking** | `POST /api/bank-lines/{id}/match-combination` finds a charge subset that sums to the bank line amount. |
 | **Dynamic programming** | `POST /api/payouts/{id}/split` chooses the fewest available charges that sum to the payout amount. |
 | **Math** | `GET /api/balance/{currency}` and `GET /api/balance/totals` compute the running balance (charges minus refunds); `GET /api/trial-balance` checks that total debits minus total credits is still zero (`balanced` in the JSON). |
+| **Linear classification** | `GET /api/invoices/aging` buckets unpaid invoices by calendar days past due (`current`, `30`, `60`, `90`, `over90`) relative to optional `asOf`. |
 
 ## Tests
 
