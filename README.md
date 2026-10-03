@@ -39,7 +39,7 @@ The **Invoice Desk** page is a small React app built into the Spring Boot jar. A
 
 It lists invoices (optional `customer`, `status`, and `currency` filters), shows one invoice’s open balance with credits and payments, displays the aging report, and loads a customer statement for a date range and currency. All data comes from the existing read APIs; nothing on the page posts changes to the ledger.
 
-Rebuild the bundled assets after editing `frontend/` with `cd frontend && npm ci && npm run build` (output lands in `src/main/resources/static/invoice-desk/`).
+Rebuild the bundled assets after editing `frontend/` with `cd frontend && npm install && npm run build` (output lands in `src/main/resources/static/invoice-desk/`).
 
 ![Invoice Desk](docs/invoice-desk.png)
 
