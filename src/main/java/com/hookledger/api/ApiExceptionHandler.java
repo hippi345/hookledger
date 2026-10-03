@@ -2,6 +2,7 @@ package com.hookledger.api;
 
 import com.hookledger.service.BankReconciliationException;
 import com.hookledger.service.IdempotencyConflictException;
+import com.hookledger.service.InvoiceException;
 import com.hookledger.service.InvalidMoneyEventException;
 import com.hookledger.service.PeriodClosedException;
 import com.hookledger.service.SettlementGraphException;
@@ -21,6 +22,11 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(BankReconciliationException.class)
     public ResponseEntity<Map<String, String>> handleBankReconciliation(BankReconciliationException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", ex.getMessage()));
+    }
+
+    @ExceptionHandler(InvoiceException.class)
+    public ResponseEntity<Map<String, String>> handleInvoice(InvoiceException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", ex.getMessage()));
     }
 
