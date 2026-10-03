@@ -181,6 +181,15 @@ public class InvoiceController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @GetMapping("/{invoiceId}")
+    @Operation(summary = "Read one invoice with open balance, credits, and payments (read-only)")
+    public ResponseEntity<InvoiceDetailResponse> get(@PathVariable String invoiceId) {
+        return invoiceService
+                .getInvoiceDetail(invoiceId)
+                .map(detail -> ResponseEntity.ok(InvoiceDetailResponse.from(detail)))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     @GetMapping("/{invoiceId}/pdf")
     @Operation(summary = "Download the invoice as a PDF")
     public ResponseEntity<byte[]> pdf(@PathVariable String invoiceId) {

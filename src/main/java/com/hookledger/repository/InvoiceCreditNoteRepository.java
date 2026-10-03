@@ -11,6 +11,8 @@ public interface InvoiceCreditNoteRepository extends JpaRepository<InvoiceCredit
     @Query("SELECT COALESCE(SUM(c.amountMinor), 0) FROM InvoiceCreditNote c WHERE c.invoice.invoiceId = :invoiceId")
     long sumAmountMinorByInvoiceId(@Param("invoiceId") String invoiceId);
 
+    List<InvoiceCreditNote> findByInvoiceInvoiceIdOrderByCreatedAtAsc(String invoiceId);
+
     @Query(
             """
             SELECT c FROM InvoiceCreditNote c JOIN c.invoice i
