@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.hookledger.AbstractPostgresIntegrationTest;
 import com.hookledger.domain.InvoiceStatus;
 import com.hookledger.repository.InvoiceCreditNoteRepository;
+import com.hookledger.repository.InvoiceLateFeeRepository;
 import com.hookledger.repository.InvoicePaymentRepository;
 import com.hookledger.repository.InvoiceRepository;
 import com.hookledger.repository.LedgerEventRepository;
@@ -40,6 +41,9 @@ class InvoiceHttpIntegrationTest extends AbstractPostgresIntegrationTest {
     private InvoicePaymentRepository invoicePaymentRepository;
 
     @Autowired
+    private InvoiceLateFeeRepository invoiceLateFeeRepository;
+
+    @Autowired
     private ReplayIdempotencyRepository replayIdempotencyRepository;
 
     @Autowired
@@ -48,6 +52,7 @@ class InvoiceHttpIntegrationTest extends AbstractPostgresIntegrationTest {
     @BeforeEach
     void cleanData() {
         replayIdempotencyRepository.deleteAll();
+        invoiceLateFeeRepository.deleteAll();
         invoicePaymentRepository.deleteAll();
         invoiceCreditNoteRepository.deleteAll();
         invoiceRepository.deleteAll();

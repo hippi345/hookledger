@@ -91,6 +91,16 @@ public class InvoiceController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @PostMapping("/{invoiceId}/late-fee")
+    @Operation(summary = "Assess a one-time late fee on an overdue unpaid invoice and post a balanced charge")
+    public ResponseEntity<InvoiceLateFeeResponse> applyLateFee(
+            @PathVariable String invoiceId, @RequestBody CreateInvoiceLateFeeRequest request) {
+        return invoiceService
+                .applyLateFee(invoiceId, request.feeMinor(), request.asOf())
+                .map(lateFee -> ResponseEntity.status(HttpStatus.CREATED).body(InvoiceLateFeeResponse.from(lateFee)))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     @PostMapping("/{invoiceId}/pay")
     @Operation(summary = "Mark an invoice paid and post a balanced charge to the ledger")
     public ResponseEntity<InvoiceResponse> pay(@PathVariable String invoiceId) {

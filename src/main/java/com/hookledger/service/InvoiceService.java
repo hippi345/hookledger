@@ -5,12 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hookledger.domain.Invoice;
 import com.hookledger.domain.InvoiceCreditNote;
 import com.hookledger.domain.InvoiceLineItem;
+import com.hookledger.domain.InvoiceLateFee;
 import com.hookledger.domain.InvoicePayment;
 import com.hookledger.domain.InvoiceStatus;
 import com.hookledger.domain.LedgerAuditAction;
 import com.hookledger.domain.LedgerEvent;
 import com.hookledger.domain.MoneyEventType;
 import com.hookledger.repository.InvoiceCreditNoteRepository;
+import com.hookledger.repository.InvoiceLateFeeRepository;
 import com.hookledger.repository.InvoicePaymentRepository;
 import com.hookledger.repository.InvoiceRepository;
 import com.hookledger.repository.LedgerEventRepository;
@@ -29,6 +31,7 @@ public class InvoiceService {
     private final InvoiceRepository invoiceRepository;
     private final InvoiceCreditNoteRepository invoiceCreditNoteRepository;
     private final InvoicePaymentRepository invoicePaymentRepository;
+    private final InvoiceLateFeeRepository invoiceLateFeeRepository;
     private final LedgerEventRepository ledgerEventRepository;
     private final ObjectMapper objectMapper;
     private final PeriodCloseService periodCloseService;
@@ -39,6 +42,7 @@ public class InvoiceService {
             InvoiceRepository invoiceRepository,
             InvoiceCreditNoteRepository invoiceCreditNoteRepository,
             InvoicePaymentRepository invoicePaymentRepository,
+            InvoiceLateFeeRepository invoiceLateFeeRepository,
             LedgerEventRepository ledgerEventRepository,
             ObjectMapper objectMapper,
             PeriodCloseService periodCloseService,
@@ -47,6 +51,7 @@ public class InvoiceService {
         this.invoiceRepository = invoiceRepository;
         this.invoiceCreditNoteRepository = invoiceCreditNoteRepository;
         this.invoicePaymentRepository = invoicePaymentRepository;
+        this.invoiceLateFeeRepository = invoiceLateFeeRepository;
         this.ledgerEventRepository = ledgerEventRepository;
         this.objectMapper = objectMapper;
         this.periodCloseService = periodCloseService;
@@ -125,6 +130,37 @@ public class InvoiceService {
             InvoiceCreditNote creditNote =
                     new InvoiceCreditNote(invoice, amountMinor, normalizedCurrency, createdAt);
             return invoiceCreditNoteRepository.saveAndFlush(creditNote);
+        });
+    }
+
+    @Transactional
+    public Optional<InvoiceLateFee> applyLateFee(String invoiceId, long feeMinor, LocalDate asOf) {
+        LocalDate effectiveAsOf = asOf != null ? asOf : LocalDate.now();
+        return invoiceRepository.findByIdWithLineItems(invoiceId).map(invoice -> {
+            if (invoice.getStatus() == InvoiceStatus.paid) {
+                throw new InvoiceException("Invoice is already paid");
+            }
+            long openAmount = openAmountMinor(invoice);
+            if (openAmount <= 0) {
+                throw new InvoiceException("Invoice has no remaining open balance");
+            }
+            if (feeMinor <= 0) {
+                throw new InvoiceException("feeMinor must be positive");
+            }
+            if (!invoice.getDueDate().isBefore(effectiveAsOf)) {
+                throw new InvoiceException("Invoice is not overdue as of the given date");
+            }
+            if (invoiceLateFeeRepository.existsByInvoiceInvoiceId(invoice.getInvoiceId())) {
+                throw new InvoiceException("Late fee already applied to this invoice");
+            }
+
+            Instant receivedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+            periodCloseService.assertOpenFor(receivedAt);
+
+            InvoiceLateFee lateFee =
+                    new InvoiceLateFee(invoice, feeMinor, invoice.getCurrency(), effectiveAsOf, receivedAt);
+            postInvoiceCharge(invoice, feeMinor, lateFee.getLedgerEventId(), receivedAt);
+            return invoiceLateFeeRepository.saveAndFlush(lateFee);
         });
     }
 
