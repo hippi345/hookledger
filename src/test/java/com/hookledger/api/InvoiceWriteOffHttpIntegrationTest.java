@@ -3,6 +3,7 @@ package com.hookledger.api;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.hookledger.AbstractPostgresIntegrationTest;
+import com.hookledger.domain.InvoiceStatus;
 import com.hookledger.repository.InvoiceCreditNoteRepository;
 import com.hookledger.repository.InvoiceLateFeeRepository;
 import com.hookledger.repository.InvoicePaymentRepository;
@@ -21,7 +22,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class InvoiceLateFeeHttpIntegrationTest extends AbstractPostgresIntegrationTest {
+class InvoiceWriteOffHttpIntegrationTest extends AbstractPostgresIntegrationTest {
 
     private static final LocalDate AS_OF = LocalDate.parse("2026-06-15");
 
@@ -61,54 +62,24 @@ class InvoiceLateFeeHttpIntegrationTest extends AbstractPostgresIntegrationTest 
     }
 
     @Test
-    void overdueInvoiceGetsOneBalancedLateFeeChargeWithoutChangingOpenBalance() {
-        InvoiceResponse invoice = createInvoice("Late Fee Co", AS_OF.minusDays(10), "usd", 5000);
+    void writeOffPostsBalancedChargeAndRemovesInvoiceFromAging() {
+        InvoiceResponse invoice = createInvoice("Write Off Co", AS_OF.minusDays(5), "usd", 4200);
 
-        ResponseEntity<InvoiceLateFeeResponse> firstFee = postLateFee(invoice.id(), 250, AS_OF);
-        assertThat(firstFee.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(firstFee.getBody()).isNotNull();
+        ResponseEntity<InvoiceResponse> writtenOff =
+                restTemplate.postForEntity("/api/invoices/" + invoice.id() + "/write-off", null, InvoiceResponse.class);
+        assertThat(writtenOff.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(writtenOff.getBody()).isNotNull();
+        assertThat(writtenOff.getBody().status()).isEqualTo(InvoiceStatus.paid);
         assertThat(ledgerEventRepository.count()).isEqualTo(1);
 
-        var charge = ledgerEventRepository.findById(firstFee.getBody().ledgerEventId()).orElseThrow();
-        assertThat(charge.getAmountMinor()).isEqualTo(250);
-        assertThat(charge.getDebitMinor()).isEqualTo(250);
-        assertThat(charge.getCreditMinor()).isEqualTo(-250);
+        var charge = ledgerEventRepository.findById(writtenOff.getBody().ledgerEventId()).orElseThrow();
+        assertThat(charge.getAmountMinor()).isEqualTo(4200);
         assertThat(charge.getDebitMinor() + charge.getCreditMinor()).isZero();
 
         ResponseEntity<InvoiceAgingResponse> aging =
                 restTemplate.getForEntity("/api/invoices/aging?asOf=" + AS_OF, InvoiceAgingResponse.class);
-        assertThat(aging.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(aging.getBody()).isNotNull();
-        assertThat(aging.getBody().currencies()).hasSize(1);
-        assertThat(aging.getBody().currencies().get(0).grandTotalAmountMinor()).isEqualTo(5000);
-
-        ResponseEntity<String> duplicate = restTemplate.postForEntity(
-                "/api/invoices/" + invoice.id() + "/late-fee",
-                new CreateInvoiceLateFeeRequest(100, AS_OF),
-                String.class);
-        assertThat(duplicate.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-        assertThat(ledgerEventRepository.count()).isEqualTo(1);
-    }
-
-    @Test
-    void notYetDueInvoiceRejectsLateFee() {
-        InvoiceResponse invoice = createInvoice("Future Due Co", AS_OF, "usd", 3000);
-
-        ResponseEntity<String> rejected = restTemplate.postForEntity(
-                "/api/invoices/" + invoice.id() + "/late-fee",
-                new CreateInvoiceLateFeeRequest(50, AS_OF),
-                String.class);
-        assertThat(rejected.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-        assertThat(ledgerEventRepository.count()).isZero();
-        assertThat(invoiceLateFeeRepository.count()).isZero();
-    }
-
-    private ResponseEntity<InvoiceLateFeeResponse> postLateFee(
-            String invoiceId, long feeMinor, LocalDate asOf) {
-        return restTemplate.postForEntity(
-                "/api/invoices/" + invoiceId + "/late-fee",
-                new CreateInvoiceLateFeeRequest(feeMinor, asOf),
-                InvoiceLateFeeResponse.class);
+        assertThat(aging.getBody().currencies()).isEmpty();
     }
 
     private InvoiceResponse createInvoice(String customer, LocalDate dueDate, String currency, long amountMinor) {
@@ -117,7 +88,6 @@ class InvoiceLateFeeHttpIntegrationTest extends AbstractPostgresIntegrationTest 
         ResponseEntity<InvoiceResponse> created =
                 restTemplate.postForEntity("/api/invoices", request, InvoiceResponse.class);
         assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(created.getBody()).isNotNull();
         return created.getBody();
     }
 }

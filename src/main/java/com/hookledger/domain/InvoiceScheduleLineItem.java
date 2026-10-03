@@ -10,16 +10,16 @@ import jakarta.persistence.Table;
 import java.util.UUID;
 
 @Entity
-@Table(name = "invoice_line_items")
-public class InvoiceLineItem {
+@Table(name = "invoice_schedule_line_items")
+public class InvoiceScheduleLineItem {
 
     @Id
     @Column(name = "line_item_id", nullable = false, updatable = false, length = 36)
     private String lineItemId;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "invoice_id", nullable = false, updatable = false)
-    private Invoice invoice;
+    @JoinColumn(name = "schedule_id", nullable = false, updatable = false)
+    private InvoiceSchedule schedule;
 
     @Column(nullable = false)
     private int lineOrder;
@@ -33,24 +33,28 @@ public class InvoiceLineItem {
     @Column(name = "tax_rate_basis_points", nullable = false)
     private int taxRateBasisPoints;
 
-    protected InvoiceLineItem() {}
+    protected InvoiceScheduleLineItem() {}
 
-    public InvoiceLineItem(
-            Invoice invoice, int lineOrder, String description, long amountMinor, int taxRateBasisPoints) {
+    public InvoiceScheduleLineItem(
+            InvoiceSchedule schedule,
+            int lineOrder,
+            String description,
+            long amountMinor,
+            int taxRateBasisPoints) {
         this.lineItemId = UUID.randomUUID().toString();
-        this.invoice = invoice;
+        this.schedule = schedule;
         this.lineOrder = lineOrder;
         this.description = description;
         this.amountMinor = amountMinor;
-        this.taxRateBasisPoints = Math.max(0, taxRateBasisPoints);
+        this.taxRateBasisPoints = taxRateBasisPoints;
     }
 
     public String getLineItemId() {
         return lineItemId;
     }
 
-    public Invoice getInvoice() {
-        return invoice;
+    public InvoiceSchedule getSchedule() {
+        return schedule;
     }
 
     public int getLineOrder() {

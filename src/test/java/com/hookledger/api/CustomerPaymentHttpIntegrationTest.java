@@ -3,7 +3,6 @@ package com.hookledger.api;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.hookledger.AbstractPostgresIntegrationTest;
-import com.hookledger.domain.InvoiceStatus;
 import com.hookledger.repository.InvoiceCreditNoteRepository;
 import com.hookledger.repository.InvoiceLateFeeRepository;
 import com.hookledger.repository.InvoicePaymentRepository;
@@ -19,11 +18,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class InvoiceHttpIntegrationTest extends AbstractPostgresIntegrationTest {
+class CustomerPaymentHttpIntegrationTest extends AbstractPostgresIntegrationTest {
+
+    private static final String CUSTOMER = "Allocate Pay Co";
 
     @Autowired
     private TestRestTemplate restTemplate;
@@ -61,44 +61,30 @@ class InvoiceHttpIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    void createPayAndDownloadPdf() {
-        CreateInvoiceRequest request = new CreateInvoiceRequest(
-                "Acme Widgets LLC",
-                "100 Demo Plaza\nFictional City, FC 00000",
-                LocalDate.parse("2026-04-15"),
-                "usd",
-                List.of(
-                        new InvoiceLineItemRequest("Widget subscription", 2500, null),
-                        new InvoiceLineItemRequest("Support hours", 750, null)));
+    void customerPaymentAllocatesOldestDueFirstWithSeparateCharges() {
+        InvoiceResponse older = createInvoice(CUSTOMER, LocalDate.parse("2026-04-01"), 2000);
+        createInvoice(CUSTOMER, LocalDate.parse("2026-05-01"), 3000);
 
+        ResponseEntity<CustomerPaymentResponse> payment = restTemplate.postForEntity(
+                "/api/customers/" + CUSTOMER + "/payments",
+                new CreateCustomerPaymentRequest(3500, "usd"),
+                CustomerPaymentResponse.class);
+        assertThat(payment.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(payment.getBody()).isNotNull();
+        assertThat(payment.getBody().appliedAmountMinor()).isEqualTo(3500);
+        assertThat(payment.getBody().payments()).hasSize(2);
+        assertThat(payment.getBody().payments().get(0).invoiceId()).isEqualTo(older.id());
+        assertThat(payment.getBody().payments().get(0).amountMinor()).isEqualTo(2000);
+        assertThat(payment.getBody().payments().get(1).amountMinor()).isEqualTo(1500);
+        assertThat(ledgerEventRepository.count()).isEqualTo(2);
+    }
+
+    private InvoiceResponse createInvoice(String customer, LocalDate dueDate, long amountMinor) {
+        CreateInvoiceRequest request = new CreateInvoiceRequest(
+                customer, null, dueDate, "usd", List.of(new InvoiceLineItemRequest("Service", amountMinor, null)));
         ResponseEntity<InvoiceResponse> created =
                 restTemplate.postForEntity("/api/invoices", request, InvoiceResponse.class);
         assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(created.getBody()).isNotNull();
-        assertThat(created.getBody().status()).isEqualTo(InvoiceStatus.open);
-        assertThat(created.getBody().totalAmountMinor()).isEqualTo(3250);
-        assertThat(ledgerEventRepository.count()).isZero();
-
-        String invoiceId = created.getBody().id();
-
-        ResponseEntity<InvoiceResponse> paid =
-                restTemplate.postForEntity("/api/invoices/" + invoiceId + "/pay", null, InvoiceResponse.class);
-        assertThat(paid.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(paid.getBody()).isNotNull();
-        assertThat(paid.getBody().status()).isEqualTo(InvoiceStatus.paid);
-        assertThat(paid.getBody().ledgerEventId()).isNotBlank();
-        assertThat(ledgerEventRepository.count()).isEqualTo(1);
-
-        var charge = ledgerEventRepository.findById(paid.getBody().ledgerEventId()).orElseThrow();
-        assertThat(charge.getDebitMinor()).isEqualTo(3250);
-        assertThat(charge.getCreditMinor()).isEqualTo(-3250);
-        assertThat(charge.getDebitMinor() + charge.getCreditMinor()).isZero();
-
-        ResponseEntity<byte[]> pdf = restTemplate.getForEntity("/api/invoices/" + invoiceId + "/pdf", byte[].class);
-        assertThat(pdf.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(pdf.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_PDF);
-        assertThat(pdf.getBody()).isNotNull();
-        assertThat(pdf.getBody().length).isGreaterThan(100);
-        assertThat(new String(pdf.getBody(), 0, 4)).isEqualTo("%PDF");
+        return created.getBody();
     }
 }

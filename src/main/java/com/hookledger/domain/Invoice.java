@@ -119,7 +119,7 @@ public class Invoice {
 
     public void addLineItem(InvoiceLineItem lineItem) {
         lineItems.add(lineItem);
-        totalAmountMinor += lineItem.getAmountMinor();
+        totalAmountMinor += InvoiceSalesTax.lineTotalMinor(lineItem.getAmountMinor(), lineItem.getTaxRateBasisPoints());
     }
 
     public void markPaid(Instant paidAt, String ledgerEventId) {
@@ -136,5 +136,9 @@ public class Invoice {
 
     public String ledgerChargeEventId() {
         return "inv_" + invoiceId.replace("-", "");
+    }
+
+    public String writeOffLedgerEventId() {
+        return "invwo_" + invoiceId.replace("-", "");
     }
 }
