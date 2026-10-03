@@ -62,4 +62,7 @@ public interface LedgerEventRepository extends JpaRepository<LedgerEvent, String
             WHERE e.currency = :currency
             """)
     long balanceMinorByCurrency(@Param("currency") String currency);
+
+    @Query("SELECT DISTINCT e.currency FROM LedgerEvent e ORDER BY e.currency ASC")
+    List<String> findDistinctCurrencies();
 }

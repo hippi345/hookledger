@@ -64,6 +64,7 @@ curl -sS -X POST http://localhost:8080/api/webhooks \
 | `POST` | `/api/period-close?through=` | Lock the ledger through an inclusive instant (ISO-8601); reject new events on or before it |
 | `GET` | `/api/period-close` | Current lock (404 if none) |
 | `GET` | `/api/balance/{currency}` | Balance in minor units for a 3-letter ISO currency |
+| `GET` | `/api/balance/totals` | Running balance in minor units for every currency present in the ledger |
 | `GET` | `/api/charges/top?limit=` | Largest charges by amount |
 | `GET` | `/api/payouts/{id}/charges` | Source charges for a payout (settlement graph walk) |
 | `POST` | `/api/events/{id}/replay` | Return event and increment replay count (404 if unknown); optional `Idempotency-Key` header replays at most once per key |
@@ -74,6 +75,10 @@ curl -sS -X POST http://localhost:8080/api/webhooks \
 | `POST` | `/api/bank-lines` | Record a bank statement line (`amountMinor`, `currency`, `date`); rows are kept after matching |
 | `GET` | `/api/bank-lines/unmatched` | Bank lines not yet linked to a ledger entry |
 | `POST` | `/api/bank-lines/{id}/match` | Link one bank line to one stored ledger event by id (`ledgerEventId` in JSON body) |
+| `GET` | `/api/bank-lines/{id}/match-suggestion` | Suggest the oldest unmatched ledger entry with the same amount and currency (does not apply the match) |
+| `POST` | `/api/bank-lines/{id}/match-greedy` | **Greedy:** link the bank line to the oldest unmatched ledger entry with the same amount and currency |
+| `POST` | `/api/bank-lines/{id}/match-combination` | **Backtracking:** link the bank line to charges whose amounts sum to the line (charges stay in the ledger) |
+| `POST` | `/api/payouts/{id}/split` | **Dynamic programming:** split a payout into the fewest available charges that sum to its amount |
 
 ### Bank reconciliation
 
@@ -81,9 +86,17 @@ Bank lines are imported from statements separately from webhook ingest. `POST /a
 
 `POST /api/bank-lines/{id}/match` links the bank line to exactly one existing ledger event. The ledger event’s **amount** (minor units) and **currency** must equal the bank line; otherwise the request is rejected with HTTP 400 and neither row is changed. After a successful match, the bank line stays in the database but no longer appears on `GET /api/bank-lines/unmatched`.
 
+`GET /api/bank-lines/{id}/match-suggestion` runs the same **Greedy** selection as `POST .../match-greedy` but only returns the suggested ledger event id.
+
+`POST /api/bank-lines/{id}/match-greedy` picks the oldest unmatched ledger entry (by `receivedAt`) with the same amount and currency, then links it like a manual match. Neither row is deleted.
+
+`POST /api/bank-lines/{id}/match-combination` uses **Backtracking** to find a set of stored `charge` events in the same currency whose amounts sum to the bank line. The charges remain in the ledger; links are stored separately. If no subset works, the request is rejected with HTTP 400.
+
+`POST /api/payouts/{id}/split` uses **Dynamic programming** to choose the fewest available `charge` events (same currency, not already used in another split or combination match) that sum to the payout amount. If no split exists, the request is rejected with HTTP 400.
+
 ### Balance
 
-Balance for a currency is **charges minus refunds** (amounts in minor units). **Payout events are recorded but do not change the balance** — only `charge` and `refund` affect the total. Reversals net against their original event type.
+Balance for a currency is **charges minus refunds** (amounts in minor units). **Payout events are recorded but do not change the balance** — only `charge` and `refund` affect the total. Reversals net against their original event type. The running balance is exposed at `GET /api/balance/{currency}`; `GET /api/balance/totals` returns that same formula for every currency that appears in stored events.
 
 ### Reversal
 
@@ -111,6 +124,10 @@ Balance for a currency is **charges minus refunds** (amounts in minor units). **
 | **Stack** | `POST /api/events/replay/undo` pops the most recent replay and restores the prior replay count. |
 | **Bit flags** | Each stored event records **signed**, **replayed**, **duplicate**, and **reversed** in `stateFlags`; API responses also expose the booleans. |
 | **Graph walk** | `GET /api/payouts/{id}/charges` walks from a payout to its source charges; ingest rejects settlement cycles (including a refund that references itself). |
+| **Greedy** | `GET /api/bank-lines/{id}/match-suggestion` and `POST /api/bank-lines/{id}/match-greedy` pick the oldest unmatched ledger entry with the same amount and currency. |
+| **Backtracking** | `POST /api/bank-lines/{id}/match-combination` finds a charge subset that sums to the bank line amount. |
+| **Dynamic programming** | `POST /api/payouts/{id}/split` chooses the fewest available charges that sum to the payout amount. |
+| **Math** | `GET /api/balance/{currency}` and `GET /api/balance/totals` compute the running balance (charges minus refunds); `GET /api/trial-balance` checks that total debits minus total credits is still zero (`balanced` in the JSON). |
 
 ## Tests
 

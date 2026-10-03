@@ -174,6 +174,15 @@ public class LedgerService {
     }
 
     @Transactional(readOnly = true)
+    public List<CurrencyBalance> balanceTotalsByCurrency() {
+        return repository.findDistinctCurrencies().stream()
+                .map(currency -> new CurrencyBalance(currency, repository.balanceMinorByCurrency(currency)))
+                .toList();
+    }
+
+    public record CurrencyBalance(String currency, long balanceMinor) {}
+
+    @Transactional(readOnly = true)
     public List<LedgerEvent> payoutSourceCharges(String payoutEventId) {
         return settlementGraphService.walkPayoutToSourceCharges(payoutEventId);
     }
