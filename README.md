@@ -88,6 +88,7 @@ curl -sS -X POST http://localhost:8080/api/webhooks \
 | `GET` | `/api/invoices/{id}/pdf` | Download the invoice as a PDF (`application/pdf`) |
 | `GET` | `/api/invoices/aging` | Unpaid invoice aging by days past due (optional `asOf` date, default today); does not post to the ledger |
 | `GET` | `/api/customers/{customer}/statement` | Customer statement for `currency` and inclusive `from` / `to` dates (minor units, read-only; does not post to the ledger) |
+| `GET` | `/api/customers/{customer}/statement.pdf` | Download the customer statement as a PDF (`application/pdf`; same data as the JSON statement) |
 
 ### Invoices
 
@@ -97,9 +98,15 @@ Invoices are stored separately from ledger events. `POST /api/invoices` accepts 
 
 `GET /api/customers/{customer}/statement?from=&to=&currency=` returns a read-only statement for one customer and currency. `{customer}` is the same identifier stored on invoices (`customerName`). Required `currency` keeps mixed currencies out of the totals. Inclusive ISO `from` and `to` dates filter each row by its activity date (invoice issue/created date, credit-note date, or payment date). The **starting balance** is invoices minus credits minus payments strictly before `from`; **ending balance** applies the same formula through `to`. Lines in the range are ordered by date and include a **running balance** (prefix sum) after each dated row. Amounts stay in minor units; nothing is posted to the ledger.
 
-Sample generated PDF (fictional customer):
+`GET /api/customers/{customer}/statement.pdf?from=&to=&currency=` returns the same statement as a PDF (`application/pdf`). Amounts in the PDF are labeled in minor units.
+
+Sample generated invoice PDF (fictional customer):
 
 ![Sample invoice PDF](docs/sample-invoice.png)
+
+Sample generated customer statement PDF (fictional customer):
+
+![Sample customer statement PDF](docs/sample-statement.png)
 
 ### Bank reconciliation
 
