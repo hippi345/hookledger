@@ -56,6 +56,9 @@ public class LedgerEvent {
     @Column(name = "payout_charge_ids", columnDefinition = "text")
     private String payoutChargeIdsJson;
 
+    @Column(name = "reverses_event_id", length = 128)
+    private String reversesEventId;
+
     protected LedgerEvent() {}
 
     public LedgerEvent(
@@ -69,6 +72,21 @@ public class LedgerEvent {
             Instant receivedAt,
             String refundChargeId,
             List<String> payoutChargeIds) {
+        this(eventId, type, amountMinor, debitMinor, creditMinor, currency, rawPayload, receivedAt, refundChargeId, payoutChargeIds, null);
+    }
+
+    public LedgerEvent(
+            String eventId,
+            MoneyEventType type,
+            long amountMinor,
+            long debitMinor,
+            long creditMinor,
+            String currency,
+            String rawPayload,
+            Instant receivedAt,
+            String refundChargeId,
+            List<String> payoutChargeIds,
+            String reversesEventId) {
         this.eventId = eventId;
         this.type = type;
         this.amountMinor = amountMinor;
@@ -81,6 +99,7 @@ public class LedgerEvent {
         this.stateFlags = EventStateFlags.SIGNED;
         this.refundChargeId = refundChargeId;
         this.payoutChargeIdsJson = encodeChargeIds(payoutChargeIds);
+        this.reversesEventId = reversesEventId;
     }
 
     public String getEventId() {
@@ -131,6 +150,14 @@ public class LedgerEvent {
         return decodeChargeIds(payoutChargeIdsJson);
     }
 
+    public String getReversesEventId() {
+        return reversesEventId;
+    }
+
+    public boolean isReversal() {
+        return reversesEventId != null;
+    }
+
     public List<String> outgoingSettlementTargets() {
         if (type == MoneyEventType.refund && refundChargeId != null) {
             return List.of(refundChargeId);
@@ -143,6 +170,10 @@ public class LedgerEvent {
 
     public void markDuplicateIngest() {
         stateFlags |= EventStateFlags.DUPLICATE;
+    }
+
+    public void markReversed() {
+        stateFlags |= EventStateFlags.REVERSED;
     }
 
     public void recordReplay() {

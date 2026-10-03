@@ -57,9 +57,12 @@ curl -sS -X POST http://localhost:8080/api/webhooks \
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/webhooks` | Ingest signed webhook (201 created, 200 if id already exists) |
-| `GET` | `/api/events` | List events (JSON, paginated: `page`, `size`) |
+| `GET` | `/api/events` | List events (JSON, paginated: `page`, `size`; optional filters `type`, `currency`) |
 | `GET` | `/api/events/{id}` | Get one stored event by id (404 if unknown) |
 | `GET` | `/api/events/by-timestamp?at=` | Get one event by exact `receivedAt` (ISO-8601) |
+| `POST` | `/api/events/{id}/reverse` | Void a posted event with a new opposite entry (`{id}_reversal`); original row stays |
+| `POST` | `/api/period-close?through=` | Lock the ledger through an inclusive instant (ISO-8601); reject new events on or before it |
+| `GET` | `/api/period-close` | Current lock (404 if none) |
 | `GET` | `/api/balance/{currency}` | Balance in minor units for a 3-letter ISO currency |
 | `GET` | `/api/charges/top?limit=` | Largest charges by amount |
 | `GET` | `/api/payouts/{id}/charges` | Source charges for a payout (settlement graph walk) |
@@ -71,7 +74,15 @@ curl -sS -X POST http://localhost:8080/api/webhooks \
 
 ### Balance
 
-Balance for a currency is **charges minus refunds** (amounts in minor units). **Payout events are recorded but do not change the balance** — only `charge` and `refund` affect the total.
+Balance for a currency is **charges minus refunds** (amounts in minor units). **Payout events are recorded but do not change the balance** — only `charge` and `refund` affect the total. Reversals net against their original event type.
+
+### Reversal
+
+`POST /api/events/{id}/reverse` creates a new stored event with id `{id}_reversal`, opposite `debitMinor` / `creditMinor`, and a link to the original. The original event is marked reversed but not deleted, so trial balance and statements still include both rows and net to zero.
+
+### Period close
+
+`POST /api/period-close?through=` sets an inclusive lock instant. Webhook ingest rejects events whose optional `effectiveAt` (or ingest time when omitted) is on or before that lock (HTTP 403). Reversing an event that falls inside a closed period is stamped at the first instant after the lock so nothing new is back-dated into the closed period.
 
 ### Trial balance
 
@@ -89,7 +100,7 @@ Balance for a currency is **charges minus refunds** (amounts in minor units). **
 | **Priority queue** | `GET /api/charges/top?limit=` returns the largest charges up to `limit`. |
 | **Regex** | Webhook ingest rejects `id` and `currency` values that do not match the allowed patterns before save. |
 | **Stack** | `POST /api/events/replay/undo` pops the most recent replay and restores the prior replay count. |
-| **Bit flags** | Each stored event records **signed**, **replayed**, and **duplicate** in `stateFlags`; API responses also expose the booleans. |
+| **Bit flags** | Each stored event records **signed**, **replayed**, **duplicate**, and **reversed** in `stateFlags`; API responses also expose the booleans. |
 | **Graph walk** | `GET /api/payouts/{id}/charges` walks from a payout to its source charges; ingest rejects settlement cycles (including a refund that references itself). |
 
 ## Tests

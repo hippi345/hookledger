@@ -2,6 +2,7 @@ package com.hookledger.webhook;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.hookledger.domain.MoneyEventType;
+import java.time.Instant;
 import java.util.List;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -13,5 +14,6 @@ public record MoneyEventPayload(
         String chargeId,
         List<String> chargeIds,
         Long debitMinor,
-        Long creditMinor) {
+        Long creditMinor,
+        Instant effectiveAt) {
 }

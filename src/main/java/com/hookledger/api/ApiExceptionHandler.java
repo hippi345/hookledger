@@ -2,6 +2,7 @@ package com.hookledger.api;
 
 import com.hookledger.service.IdempotencyConflictException;
 import com.hookledger.service.InvalidMoneyEventException;
+import com.hookledger.service.PeriodClosedException;
 import com.hookledger.service.SettlementGraphException;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
@@ -25,5 +26,10 @@ public class ApiExceptionHandler {
     @ExceptionHandler(IdempotencyConflictException.class)
     public ResponseEntity<Map<String, String>> handleIdempotencyConflict(IdempotencyConflictException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", ex.getMessage()));
+    }
+
+    @ExceptionHandler(PeriodClosedException.class)
+    public ResponseEntity<Map<String, String>> handlePeriodClosed(PeriodClosedException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
     }
 }
