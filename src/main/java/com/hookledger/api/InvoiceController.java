@@ -5,6 +5,7 @@ import com.hookledger.service.InvoiceOverdueService;
 import com.hookledger.service.InvoiceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.List;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -38,12 +39,51 @@ public class InvoiceController {
         this.invoiceOverdueService = invoiceOverdueService;
     }
 
+    @GetMapping
+    @Operation(summary = "List invoices with optional customer, status, and currency filters (paginated)")
+    public InvoiceListResponse list(
+            @RequestParam(required = false) String customer,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String currency,
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(defaultValue = "0") int offset) {
+        return InvoiceListResponse.from(invoiceService.listInvoices(customer, status, currency, limit, offset));
+    }
+
     @GetMapping("/aging")
     @Operation(summary = "Accounts-receivable aging for unpaid invoices (does not post to the ledger)")
     public InvoiceAgingResponse aging(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
         LocalDate effectiveAsOf = asOf != null ? asOf : LocalDate.now();
         return InvoiceAgingResponse.from(invoiceAgingService.buildReport(effectiveAsOf));
+    }
+
+    @GetMapping(value = "/aging.csv", produces = "text/csv")
+    @Operation(summary = "CSV export of the invoice aging report (optional asOf date, default today)")
+    public ResponseEntity<byte[]> agingCsv(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
+        LocalDate effectiveAsOf = asOf != null ? asOf : LocalDate.now();
+        StringBuilder csv = new StringBuilder();
+        csv.append("customer,invoice_id,due_date,currency,bucket,open_amount_minor\n");
+        for (var line : invoiceAgingService.csvLines(effectiveAsOf)) {
+            csv.append(line.customer())
+                    .append(',')
+                    .append(line.invoiceId())
+                    .append(',')
+                    .append(line.dueDate())
+                    .append(',')
+                    .append(line.currency())
+                    .append(',')
+                    .append(line.bucket())
+                    .append(',')
+                    .append(line.openAmountMinor())
+                    .append('\n');
+        }
+        byte[] body = csv.toString().getBytes(StandardCharsets.UTF_8);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"invoice-aging.csv\"")
+                .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+                .body(body);
     }
 
     @GetMapping("/overdue")
@@ -104,12 +144,31 @@ public class InvoiceController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @PostMapping("/{invoiceId}/void")
+    @Operation(summary = "Void an unpaid invoice (does not post to the ledger)")
+    public ResponseEntity<InvoiceResponse> voidInvoice(@PathVariable String invoiceId) {
+        return invoiceService
+                .voidInvoice(invoiceId)
+                .map(invoice -> ResponseEntity.ok(InvoiceResponse.from(invoice)))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     @PostMapping("/{invoiceId}/write-off")
     @Operation(summary = "Write off the remaining open balance and post a balanced charge to the ledger")
     public ResponseEntity<InvoiceResponse> writeOff(@PathVariable String invoiceId) {
         return invoiceService
                 .writeOff(invoiceId)
                 .map(invoice -> ResponseEntity.ok(InvoiceResponse.from(invoice)))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/{invoiceId}/payments/{paymentId}/refund")
+    @Operation(summary = "Refund a posted invoice payment with a balanced ledger reversal")
+    public ResponseEntity<InvoicePaymentRefundResponse> refundPayment(
+            @PathVariable String invoiceId, @PathVariable String paymentId) {
+        return invoiceService
+                .refundPayment(invoiceId, paymentId)
+                .map(result -> ResponseEntity.ok(InvoicePaymentRefundResponse.from(result)))
                 .orElse(ResponseEntity.notFound().build());
     }
 

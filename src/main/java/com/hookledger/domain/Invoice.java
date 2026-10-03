@@ -48,6 +48,9 @@ public class Invoice {
     @Column(name = "paid_at")
     private Instant paidAt;
 
+    @Column(name = "voided_at")
+    private Instant voidedAt;
+
     @Column(name = "ledger_event_id", length = 128)
     private String ledgerEventId;
 
@@ -109,6 +112,10 @@ public class Invoice {
         return paidAt;
     }
 
+    public Instant getVoidedAt() {
+        return voidedAt;
+    }
+
     public String getLedgerEventId() {
         return ledgerEventId;
     }
@@ -131,6 +138,17 @@ public class Invoice {
     public void markSettledWithoutLedger(Instant paidAt) {
         this.status = InvoiceStatus.paid;
         this.paidAt = paidAt;
+        this.ledgerEventId = null;
+    }
+
+    public void markVoid(Instant voidedAt) {
+        this.status = InvoiceStatus.voided;
+        this.voidedAt = voidedAt;
+    }
+
+    public void markReopen() {
+        this.status = InvoiceStatus.open;
+        this.paidAt = null;
         this.ledgerEventId = null;
     }
 

@@ -3,9 +3,10 @@ package com.hookledger.api;
 import com.hookledger.service.CustomerInvoicePaymentService;
 import com.hookledger.service.CustomerStatementPdfService;
 import com.hookledger.service.CustomerStatementService;
-import java.nio.charset.StandardCharsets;
+import com.hookledger.service.InvoiceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
@@ -27,14 +28,23 @@ public class CustomerController {
     private final CustomerStatementService customerStatementService;
     private final CustomerStatementPdfService customerStatementPdfService;
     private final CustomerInvoicePaymentService customerInvoicePaymentService;
+    private final InvoiceService invoiceService;
 
     public CustomerController(
             CustomerStatementService customerStatementService,
             CustomerStatementPdfService customerStatementPdfService,
-            CustomerInvoicePaymentService customerInvoicePaymentService) {
+            CustomerInvoicePaymentService customerInvoicePaymentService,
+            InvoiceService invoiceService) {
         this.customerStatementService = customerStatementService;
         this.customerStatementPdfService = customerStatementPdfService;
         this.customerInvoicePaymentService = customerInvoicePaymentService;
+        this.invoiceService = invoiceService;
+    }
+
+    @GetMapping
+    @Operation(summary = "Search customer names by prefix (case-insensitive prefix scan)")
+    public CustomerNameListResponse search(@RequestParam(required = false) String q) {
+        return new CustomerNameListResponse(invoiceService.searchCustomerNames(q));
     }
 
     @GetMapping("/{customer}/statement")
