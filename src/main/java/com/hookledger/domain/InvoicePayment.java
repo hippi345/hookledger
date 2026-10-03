@@ -34,6 +34,12 @@ public class InvoicePayment {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Column(name = "refunded_at")
+    private Instant refundedAt;
+
+    @Column(name = "refund_ledger_event_id", length = 128)
+    private String refundLedgerEventId;
+
     protected InvoicePayment() {}
 
     public InvoicePayment(Invoice invoice, long amountMinor, String currency, Instant createdAt) {
@@ -67,6 +73,23 @@ public class InvoicePayment {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public Instant getRefundedAt() {
+        return refundedAt;
+    }
+
+    public String getRefundLedgerEventId() {
+        return refundLedgerEventId;
+    }
+
+    public boolean isRefunded() {
+        return refundedAt != null;
+    }
+
+    public void markRefunded(Instant refundedAt, String refundLedgerEventId) {
+        this.refundedAt = refundedAt;
+        this.refundLedgerEventId = refundLedgerEventId;
     }
 
     public String ledgerChargeEventId() {

@@ -56,6 +56,33 @@ public class InvoiceAgingService {
         return new InvoiceAgingReport(asOf, currencies);
     }
 
+    @Transactional(readOnly = true)
+    public List<AgingCsvLine> csvLines(LocalDate asOf) {
+        InvoiceAgingReport report = buildReport(asOf);
+        List<AgingCsvLine> rows = new ArrayList<>();
+        for (CurrencyAging currencyAging : report.currencies()) {
+            appendBucketRows(rows, currencyAging.current(), "current");
+            appendBucketRows(rows, currencyAging.days1To30(), "30");
+            appendBucketRows(rows, currencyAging.days31To60(), "60");
+            appendBucketRows(rows, currencyAging.days61To90(), "90");
+            appendBucketRows(rows, currencyAging.over90(), "over90");
+        }
+        rows.sort(Comparator.comparing(AgingCsvLine::customer).thenComparing(AgingCsvLine::invoiceId));
+        return rows;
+    }
+
+    private static void appendBucketRows(List<AgingCsvLine> rows, BucketTotals bucket, String bucketLabel) {
+        for (InvoiceAgingLine line : bucket.invoices()) {
+            rows.add(new AgingCsvLine(
+                    line.customer(),
+                    line.id(),
+                    line.dueDate(),
+                    line.currency(),
+                    bucketLabel,
+                    line.openAmountMinor()));
+        }
+    }
+
     static AgingBucket classifyBucket(LocalDate dueDate, LocalDate asOf) {
         long daysPastDue = ChronoUnit.DAYS.between(dueDate, asOf);
         if (daysPastDue <= 0) {
@@ -105,6 +132,14 @@ public class InvoiceAgingService {
 
     public record InvoiceAgingLine(
             String id, String customer, LocalDate dueDate, String currency, long openAmountMinor) {}
+
+    public record AgingCsvLine(
+            String customer,
+            String invoiceId,
+            LocalDate dueDate,
+            String currency,
+            String bucket,
+            long openAmountMinor) {}
 
     private static final class MutableCurrencyAging {
         private final String currency;

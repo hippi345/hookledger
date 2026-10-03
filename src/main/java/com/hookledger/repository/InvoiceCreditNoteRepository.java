@@ -12,7 +12,12 @@ public interface InvoiceCreditNoteRepository extends JpaRepository<InvoiceCredit
     long sumAmountMinorByInvoiceId(@Param("invoiceId") String invoiceId);
 
     @Query(
-            "SELECT c FROM InvoiceCreditNote c JOIN c.invoice i WHERE i.customerName = :customerName AND c.currency = :currency")
+            """
+            SELECT c FROM InvoiceCreditNote c JOIN c.invoice i
+            WHERE i.customerName = :customerName AND c.currency = :currency AND i.status <> com.hookledger.domain.InvoiceStatus.voided
+            """)
     List<InvoiceCreditNote> findByCustomerNameAndCurrency(
             @Param("customerName") String customerName, @Param("currency") String currency);
+
+    void deleteByInvoiceInvoiceId(String invoiceId);
 }

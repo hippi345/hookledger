@@ -2,6 +2,7 @@ package com.hookledger.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hookledger.api.InvoiceResponse;
 import com.hookledger.domain.Invoice;
 import com.hookledger.domain.InvoiceCreditNote;
 import com.hookledger.domain.InvoiceLineItem;
@@ -11,6 +12,9 @@ import com.hookledger.domain.InvoiceStatus;
 import com.hookledger.domain.LedgerAuditAction;
 import com.hookledger.domain.LedgerEvent;
 import com.hookledger.domain.MoneyEventType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import com.hookledger.repository.InvoiceCreditNoteRepository;
 import com.hookledger.repository.InvoiceLateFeeRepository;
 import com.hookledger.repository.InvoicePaymentRepository;
@@ -37,6 +41,7 @@ public class InvoiceService {
     private final PeriodCloseService periodCloseService;
     private final LedgerAuditService ledgerAuditService;
     private final InvoicePdfService invoicePdfService;
+    private final LedgerService ledgerService;
 
     public InvoiceService(
             InvoiceRepository invoiceRepository,
@@ -47,7 +52,8 @@ public class InvoiceService {
             ObjectMapper objectMapper,
             PeriodCloseService periodCloseService,
             LedgerAuditService ledgerAuditService,
-            InvoicePdfService invoicePdfService) {
+            InvoicePdfService invoicePdfService,
+            LedgerService ledgerService) {
         this.invoiceRepository = invoiceRepository;
         this.invoiceCreditNoteRepository = invoiceCreditNoteRepository;
         this.invoicePaymentRepository = invoicePaymentRepository;
@@ -57,6 +63,7 @@ public class InvoiceService {
         this.periodCloseService = periodCloseService;
         this.ledgerAuditService = ledgerAuditService;
         this.invoicePdfService = invoicePdfService;
+        this.ledgerService = ledgerService;
     }
 
     @Transactional
@@ -107,9 +114,7 @@ public class InvoiceService {
     @Transactional
     public Optional<InvoiceCreditNote> applyCredit(String invoiceId, long amountMinor, String currency) {
         return invoiceRepository.findByIdWithLineItems(invoiceId).map(invoice -> {
-            if (invoice.getStatus() == InvoiceStatus.paid) {
-                throw new InvoiceException("Invoice is already paid");
-            }
+            assertOpenForChanges(invoice);
             if (amountMinor <= 0) {
                 throw new InvoiceException("amountMinor must be positive");
             }
@@ -137,9 +142,7 @@ public class InvoiceService {
     public Optional<InvoiceLateFee> applyLateFee(String invoiceId, long feeMinor, LocalDate asOf) {
         LocalDate effectiveAsOf = asOf != null ? asOf : LocalDate.now();
         return invoiceRepository.findByIdWithLineItems(invoiceId).map(invoice -> {
-            if (invoice.getStatus() == InvoiceStatus.paid) {
-                throw new InvoiceException("Invoice is already paid");
-            }
+            assertOpenForChanges(invoice);
             long openAmount = openAmountMinor(invoice);
             if (openAmount <= 0) {
                 throw new InvoiceException("Invoice has no remaining open balance");
@@ -167,9 +170,7 @@ public class InvoiceService {
     @Transactional
     public Optional<InvoicePayment> applyPayment(String invoiceId, long amountMinor, String currency) {
         return invoiceRepository.findByIdWithLineItems(invoiceId).map(invoice -> {
-            if (invoice.getStatus() == InvoiceStatus.paid) {
-                throw new InvoiceException("Invoice is already paid");
-            }
+            assertOpenForChanges(invoice);
             if (amountMinor <= 0) {
                 throw new InvoiceException("amountMinor must be positive");
             }
@@ -204,11 +205,100 @@ public class InvoiceService {
     }
 
     @Transactional
-    public Optional<Invoice> markPaid(String invoiceId) {
+    public Optional<Invoice> voidInvoice(String invoiceId) {
         return invoiceRepository.findByIdWithLineItems(invoiceId).map(invoice -> {
+            if (invoice.getStatus() == InvoiceStatus.voided) {
+                throw new InvoiceException("Invoice is already void");
+            }
             if (invoice.getStatus() == InvoiceStatus.paid) {
                 throw new InvoiceException("Invoice is already paid");
             }
+            if (invoicePaymentRepository.countByInvoiceInvoiceId(invoiceId) > 0) {
+                throw new InvoiceException("Cannot void an invoice with payments");
+            }
+            if (invoiceLateFeeRepository.existsByInvoiceInvoiceId(invoiceId)) {
+                throw new InvoiceException("Cannot void an invoice with a late fee");
+            }
+
+            invoiceCreditNoteRepository.deleteByInvoiceInvoiceId(invoiceId);
+            Instant voidedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+            invoice.markVoid(voidedAt);
+            return invoiceRepository.save(invoice);
+        });
+    }
+
+    @Transactional
+    public Optional<PaymentRefundResult> refundPayment(String invoiceId, String paymentId) {
+        return invoicePaymentRepository
+                .findByPaymentIdAndInvoiceId(paymentId, invoiceId)
+                .map(payment -> {
+                    if (payment.isRefunded()) {
+                        throw new InvoiceException("Payment is already refunded");
+                    }
+                    Invoice invoice = payment.getInvoice();
+                    if (invoice.getStatus() == InvoiceStatus.voided) {
+                        throw new InvoiceException("Invoice is void");
+                    }
+
+                    LedgerEvent reversal = ledgerService
+                            .reverse(payment.getLedgerEventId())
+                            .orElseThrow(() -> new InvoiceException("Ledger event not found for payment"));
+
+                    Instant refundedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+                    payment.markRefunded(refundedAt, reversal.getEventId());
+                    invoicePaymentRepository.save(payment);
+
+                    if (invoice.getStatus() == InvoiceStatus.paid) {
+                        invoice.markReopen();
+                        invoiceRepository.save(invoice);
+                    }
+
+                    return new PaymentRefundResult(payment, reversal.getEventId());
+                });
+    }
+
+    @Transactional(readOnly = true)
+    public List<String> searchCustomerNames(String query) {
+        if (query == null || query.isBlank()) {
+            return invoiceRepository.findDistinctCustomerNames();
+        }
+        return invoiceRepository.findDistinctCustomerNamesByPrefix(query.trim());
+    }
+
+    @Transactional(readOnly = true)
+    public InvoiceListPage listInvoices(String customer, String status, String currency, int limit, int offset) {
+        if (limit <= 0) {
+            throw new InvoiceException("limit must be positive");
+        }
+        if (offset < 0) {
+            throw new InvoiceException("offset must not be negative");
+        }
+
+        String customerFilter = customer == null || customer.isBlank() ? null : customer;
+        InvoiceStatus statusFilter = parseStatusFilter(status);
+        String currencyFilter = null;
+        if (currency != null && !currency.isBlank()) {
+            if (!MoneyEventValidation.CURRENCY.matcher(currency).matches()) {
+                throw new InvoiceException("Currency must be a 3-letter ISO code");
+            }
+            currencyFilter = currency.toUpperCase();
+        }
+
+        int page = offset / limit;
+        Page<Invoice> invoices = invoiceRepository.findFiltered(
+                customerFilter,
+                statusFilter,
+                currencyFilter,
+                PageRequest.of(page, limit, Sort.by(Sort.Direction.DESC, "createdAt", "invoiceId")));
+        List<InvoiceResponse> mapped =
+                invoices.getContent().stream().map(InvoiceResponse::from).toList();
+        return new InvoiceListPage(mapped, limit, offset, invoices.getTotalElements());
+    }
+
+    @Transactional
+    public Optional<Invoice> markPaid(String invoiceId) {
+        return invoiceRepository.findByIdWithLineItems(invoiceId).map(invoice -> {
+            assertOpenForChanges(invoice);
 
             long openAmount = openAmountMinor(invoice);
             Instant receivedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
@@ -290,6 +380,26 @@ public class InvoiceService {
         }
     }
 
+    private static void assertOpenForChanges(Invoice invoice) {
+        if (invoice.getStatus() == InvoiceStatus.voided) {
+            throw new InvoiceException("Invoice is void");
+        }
+        if (invoice.getStatus() == InvoiceStatus.paid) {
+            throw new InvoiceException("Invoice is already paid");
+        }
+    }
+
+    private static InvoiceStatus parseStatusFilter(String status) {
+        if (status == null || status.isBlank()) {
+            return null;
+        }
+        try {
+            return InvoiceStatus.fromApiValue(status);
+        } catch (IllegalArgumentException e) {
+            throw new InvoiceException("status must be open, paid, or void");
+        }
+    }
+
     private static void validateCustomer(String customerName) {
         if (customerName == null || customerName.isBlank()) {
             throw new InvoiceException("customerName is required");
@@ -304,4 +414,8 @@ public class InvoiceService {
     }
 
     public record LineItemInput(String description, long amountMinor) {}
+
+    public record PaymentRefundResult(InvoicePayment payment, String reversalLedgerEventId) {}
+
+    public record InvoiceListPage(List<InvoiceResponse> invoices, int limit, int offset, long total) {}
 }
